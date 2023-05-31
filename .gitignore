@@ -1,0 +1,18 @@
+# VSCode
+.vscode/
+
+# Visual Studio
+.vs/
+*.hint
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+out/
+build/*
+*.exe
+
+# Python
+__pycache__/

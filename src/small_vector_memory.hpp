@@ -12,6 +12,30 @@
 
 namespace detail
 {
+    //----------------------------------------- ALLOCATE / DEALLOCATE ---------------------------------------------------
+
+    template<typename T, typename A>
+    constexpr alloc_pointer_t<A> allocate(A& allocator, alloc_size_t<A> count)
+    {
+        if constexpr (is_replaceable_allocator_v<A>)
+        {
+            auto p = (alloc_pointer_t<A>) std::malloc(sizeof(T) * count);
+            if (!p) throw std::bad_alloc{};
+            return p;
+        }
+        else { return std::allocator_traits<A>::allocate(allocator, count); }
+    }
+
+    template<typename A>
+    constexpr void deallocate(A& allocator, alloc_pointer_t<A> data, alloc_size_t<A> count) noexcept
+    {
+        if constexpr (is_replaceable_allocator_v<A>)
+        {
+            std::free(data);
+        }
+        else { std::allocator_traits<A>::deallocate(allocator, data, count); }
+    }
+
     //--------------------------- CONSTRUCT / DESTROY ONE IN UNINITIALIZED MEMORY ---------------------------------------
 
     template<typename T, typename A>
@@ -66,7 +90,7 @@ namespace detail
     noexcept(std::is_nothrow_constructible_v<T, TArg, TArgs...> && has_trivial_construct_v<A, TArg, TArgs...>)
     requires(!std::is_same_v<std::remove_cvref_t<TArg>, std::remove_cvref_t<T>>)
     {
-        std::allocator_traits<A>::construct(allocator, at, std::forward<TArgs>(arg), std::forward<TArgs>(args)...);
+        std::allocator_traits<A>::construct(allocator, at, std::forward<TArg>(arg), std::forward<TArgs>(args)...);
     }
 
     //--------------------------- CONSTRUCT / DESTROY RANGE IN UNINITIALIZED MEMORY ---------------------------------------

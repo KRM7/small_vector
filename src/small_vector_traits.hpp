@@ -13,19 +13,43 @@
 #endif
 
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#   define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#elif __has_cpp_attribute(no_unique_address)
+#   define NO_UNIQUE_ADDRESS [[no_unique_address]]
+#else
+#   define NO_UNIQUE_ADDRESS
+#endif
+
+
+template<typename Allocator>
+using alloc_pointer_t = typename std::allocator_traits<Allocator>::pointer;
+
+template<typename Allocator>
+using alloc_size_t = typename std::allocator_traits<Allocator>::size_type;
+
+
+namespace detail
+{
+	template<template<typename...> class Trait, typename Void, typename... Args>
+	struct is_detected : std::false_type {};
+
+	template<template<typename...> class Trait, typename... Args>
+	struct is_detected<Trait, std::void_t<Trait<Args...>>, Args...> : std::true_type {};
+}
+
+template<template<typename...> class Trait, typename... Args>
+using is_detected = typename detail::is_detected<Trait, void, Args...>::type;
+
+
 // 'Allocator' has a trivial construct method for the type 'T' with the arguments 'TArgs'
 // if calling allocator_traits<Allocator>::construct is equivalent to directly calling the
 // construct of T
 template<typename Allocator, typename T, typename... Args>
-struct has_trivial_construct
-{
-private:
-	template<typename = decltype( std::declval<Allocator>().construct(std::declval<T*>(), std::declval<Args>()...) )>
-	static std::false_type test(int);
-	static std::true_type test(...);
-public:
-	constexpr static bool value = decltype( test(0) )::value;
-};
+using construct_t = decltype( std::declval<Allocator>().construct(std::declval<T*>(), std::declval<Args>()...) );
+
+template<typename Allocator, typename T, typename... Args>
+struct has_trivial_construct : is_detected<construct_t, T, Args...> {};
 
 template<typename Allocator, typename T, typename... Args>
 inline constexpr bool has_trivial_construct_v = has_trivial_construct<Allocator, T, Args...>::value;
@@ -35,15 +59,10 @@ inline constexpr bool has_trivial_construct_v = has_trivial_construct<Allocator,
 // allocator_traits<Allocator>::destroy is equivalent to directly calling the
 // destructor of T
 template<typename Allocator, typename T>
-struct has_trivial_destroy
-{
-private:
-	template<typename = decltype( std::declval<Allocator>().destroy(std::declval<T*>()) )>
-	static std::false_type test(int);
-	static std::true_type test(...);
-public:
-	constexpr static bool value = decltype( test(0) )::value;
-};
+using destroy_t = decltype( std::declval<Allocator>().destroy(std::declval<T*>()) );
+
+template<typename Allocator, typename T>
+struct has_trivial_destroy : is_detected<destroy_t, T> {};
 
 template<typename Allocator, typename T>
 inline constexpr bool has_trivial_destroy_v = has_trivial_destroy<Allocator, T>::value;

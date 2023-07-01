@@ -110,6 +110,7 @@ public:
     {
         if (other.is_small())
         {
+            set_buffer_storage(0);
             detail::relocate_range_weak(alloc_, other.first_, other.last_, first_);
             detail::destroy_range(alloc_, other.first_, other.last_);
             set_buffer_storage(other.size());
@@ -143,27 +144,34 @@ public:
         const auto src_size = std::distance(src_first, src_last);
         const auto old_size = std::distance(first_, last_);
 
-        if (capacity() >= src_size)
+        if (capacity() >= size_type(src_size))
         {
-            detail::assign_range(first_, last_, src_first);
-            if (old_size < src_size) detail::construct_range(alloc_, last_, first_ + src_size, src_first + old_size);
-            else if (old_size > src_size) detail::destroy_range(alloc_, first_ + src_size, last_);
+            if (old_size < src_size)
+            {
+                detail::assign_range(first_, last_, src_first);
+                detail::construct_range(alloc_, last_, first_ + src_size, src_first + old_size);
+            }
+            else if (old_size >= src_size)
+            {
+                detail::assign_range(first_, first_ + src_size, src_first);
+                detail::destroy_range(alloc_, first_ + src_size, last_);
+            }
             last_ = first_ + src_size;
         }
-        else if (is_trivially_relocatable_v<T> && is_replaceable_allocator_v<A> && !is_small()) // TODO: review
+        else if (!is_small() && is_trivially_relocatable_v<T> && is_replaceable_allocator_v<A>)
         {
             pointer new_first = (pointer) std::realloc(first_, sizeof(T) * src_size);
             if (!new_first) throw std::bad_alloc{};
             scope_exit guard{ [&] { std::free(new_first); } };
             detail::assign_range(new_first, new_first + old_size, src_first);
-            if (old_size < src_size) detail::construct_range(alloc_, new_first + old_size, new_first + src_size, src_first + old_size);
+            detail::construct_range(alloc_, new_first + old_size, new_first + src_size, src_first + old_size);
             guard.release();
             set_storage(new_first, src_size, src_size);
         }
         else
         {
-            pointer new_first = std::allocator_traits<A>::allocate(alloc_, src_size);
-            scope_exit guard{ [&] { std::allocator_traits<A>::deallocate(alloc_, new_first, src_size); } };
+            pointer new_first = detail::allocate<T>(alloc_, src_size);
+            scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, src_size); } };
             detail::construct_range(alloc_, new_first, new_first + src_size, src_first);
             detail::destroy_range(alloc_, first_, last_);
             guard.release();
@@ -174,7 +182,7 @@ public:
 
     small_vector& operator=(const small_vector& other)
     {
-        if (std::addressof(other) == this) [[unlikely]] return;
+        if (std::addressof(other) == this) [[unlikely]] return *this;
 
         if constexpr (std::allocator_traits<A>::propagate_on_container_copy_assignment::value)
         {
@@ -188,7 +196,7 @@ public:
 
     small_vector& operator=(small_vector&& other) // TODO
     {
-        if (std::addressof(other) == this) [[unlikely]] return;
+        if (std::addressof(other) == this) [[unlikely]] return *this;
 
         if constexpr (std::allocator_traits<A>::propagate_on_container_move_assignment::value)
         {
@@ -328,7 +336,7 @@ public:
             big.set_buffer_storage(small_size);
         }
 
-        if constexpr (std::allocator_traits<T>::propagate_on_container_swap::value)
+        if constexpr (std::allocator_traits<A>::propagate_on_container_swap::value)
         {
             using std::swap;
             swap(alloc_, other.alloc_);
@@ -339,13 +347,13 @@ public:
     void push_back(T&& value) { emplace_back(std::move(value)); }
 
     template<typename... Args>
-    void emplace_back(Args&&... args)
+    reference emplace_back(Args&&... args)
     {
         assert(!( memcontains(args) || ... )); // disallowed so we can realloc()
 
         if (size() == capacity()) reallocate_n(next_capacity());
         detail::construct(alloc_, last_, std::forward<Args>(args)...);
-        last_++;
+        return *last_++;
     }
 
     void pop_back() noexcept { assert(!empty()); detail::destroy(alloc_, last_--); }
@@ -353,17 +361,30 @@ public:
     void resize(size_type count) { resize_impl(count); }
     void resize(size_type count, const T& value) { resize_impl(count, value); }
 
+    iterator insert(const_iterator pos, const T& value) { return emplace(pos, value); }
+    iterator insert(const_iterator pos, T&& value) { return emplace(pos, std::move(value)); }
 
-    // insert
-    //      insert single value
-    //      insert range
-    //      rest is not implemented
-
-    iterator erase(const_iterator pos)
+    template<typename... Args>
+    iterator emplace(const_iterator pos, Args&&... args)
     {
-        assert(pos != end());
-        return erase(pos, pos + 1);
+        assert(!( memcontains(args) || ... ));
+
+        if (pos == cend())
+        {
+            emplace_back(std::forward<Args>(args)...);
+            return last_ - 1;
+        }
+
+        difference_type offset = std::distance(cbegin(), pos);
+        if (size() == capacity()) reallocate_n(next_capacity());
+        detail::construct(alloc_, last_, std::move(back()));
+        last_++;
+        std::move_backward(first_ + offset, last_ - 2, last_ - 1);
+        *(first_ + offset) = T(std::forward<Args>(args)...);
+        return first_ + offset;
     }
+
+    iterator erase(const_iterator pos) { assert(pos != end()); return erase(pos, pos + 1); }
 
     iterator erase(const_iterator first, const_iterator last)
     {
@@ -396,7 +417,7 @@ private:
     pointer first_      = nullptr;
     pointer last_       = nullptr;
     pointer last_alloc_ = nullptr;
-    [[no_unique_address]] allocator_type alloc_;
+    NO_UNIQUE_ADDRESS allocator_type alloc_;
 
     static inline constexpr double growth_factor_ = std::numbers::phi;
 
@@ -407,15 +428,9 @@ private:
         {
             set_buffer_storage(0);
         }
-        else if constexpr (is_replaceable_allocator_v<A>)
-        {
-            first_ = (pointer) std::malloc(sizeof(T) * count);
-            if (!first_) throw std::bad_alloc{};
-            last_alloc_ = first_ + count;
-        }
         else
         {
-            first_ = std::allocator_traits<A>::allocate(alloc_, count);
+            first_ = detail::allocate<T>(alloc_, count);
             last_alloc_ = first_ + count;
         }
     }
@@ -426,7 +441,7 @@ private:
 
         const size_type old_size = size();
 
-        if (is_trivially_relocatable_v<T> && is_replaceable_allocator_v<A> && !is_small())
+        if (!is_small() && is_trivially_relocatable_v<T> && is_replaceable_allocator_v<A>)
         {
             pointer new_first = (pointer) std::realloc(first_, sizeof(T) * new_capacity);
             if (!new_first) throw std::bad_alloc{};
@@ -434,8 +449,8 @@ private:
         }
         else
         {
-            pointer new_first = std::allocator_traits<A>::allocate(alloc_, new_capacity);
-            scope_exit guard{ [&] { std::allocator_traits<A>::deallocate(alloc_, new_first, new_capacity); } };
+            pointer new_first = detail::allocate<T>(alloc_, new_capacity);
+            scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_capacity); } };
             detail::relocate_range_strong(alloc_, first_, last_, new_first);
             detail::destroy_range(alloc_, first_, last_);
             deallocate();
@@ -446,16 +461,7 @@ private:
 
     void deallocate() noexcept
     {
-        if (is_small() || !data()) return;
-
-        if constexpr (is_replaceable_allocator_v<A>)
-        {
-            std::free(first_);
-        }
-        else
-        {
-            std::allocator_traits<A>::deallocate(alloc_, first_, capacity());
-        }
+        if (!is_small() && data()) detail::deallocate(alloc_, first_, capacity());
     }
 
     void reset() noexcept
@@ -474,11 +480,11 @@ private:
             last_ = first_ + count;
             return;
         }
-
-        reallocate_n(count);
-        if (count > size())
+        else if (count > size())
         {
+            reallocate_n(count);
             detail::construct_range(alloc_, last_, first_ + count, std::forward<Args>(args)...);
+            last_ = first_ + count;
         }
     }
 
@@ -515,7 +521,7 @@ private:
 
 }; // class small_vector
 
-template<std::forward_iterator Iter, std::size_t Size /* TODO: default */, typename Alloc = std::allocator<std::iter_value_t<Iter>>>
+template<std::forward_iterator Iter, std::size_t Size = 8 /* TODO: default */, typename Alloc = std::allocator<std::iter_value_t<Iter>>>
 small_vector(Iter, Iter, Alloc = {}) -> small_vector<std::iter_value_t<Iter>, Size, Alloc>;
 
 template<typename T, std::size_t Size, typename A>

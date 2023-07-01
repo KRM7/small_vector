@@ -3,10 +3,9 @@
 
 #include <functional> // for invoke
 #include <type_traits> // for is_nothrow_move_constructible
-#include <concepts> // for invocable
 #include <utility> // for move
 
-template<std::invocable F>
+template<typename F>
 class scope_exit
 {
 public:

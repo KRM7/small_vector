@@ -1,0 +1,48 @@
+﻿﻿name: sanitizers
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [ address, undefined ]
+        include:
+          - cxx: clang++-15
+            pkgs: clang-15 llvm-15
+            
+    env:
+      ASAN_OPTIONS: check_initialization_order=1:strict_init_order=1:detect_stack_use_after_return=1:detect_leaks=1
+      UBSAN_OPTIONS: print_stacktrace=1:print_summary=1
+      
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/build
+
+
+    name: ${{ matrix.cxx }} -fsanitize=${{ matrix.sanitizer }}
+
+    steps:
+    - name: checkout-repo
+      uses: actions/checkout@v3
+
+    - name: setup-compiler
+      run: sudo apt update && sudo apt install -y ${{ matrix.pkgs }}
+
+    - name: setup-catch
+      env:
+        CXX: ${{ matrix.cxx }}
+      run: sudo bash ./install_catch.sh
+
+    - name: setup-build
+      env:
+        CXX: ${{ matrix.cxx }}
+      run: cmake .. -DSMALL_VECTOR_FLAGS="-fsanitize=${{ matrix.sanitizer }} -g -fno-omit-frame-pointer"
+
+    - name: build
+      run: cmake --build .
+    
+    - name: run-tests
+      run: ctest --output-on-failure --schedule-random

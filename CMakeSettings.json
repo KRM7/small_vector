@@ -8,8 +8,17 @@
       "installRoot": "${projectDir}\\out\\install\\${name}",
       "ctestCommandArgs": "--output-on-failure --schedule-random",
       "codeAnalysisRuleset": "${projectDir}\\core-guidelines.ruleset",
-      "enableMicrosoftCodeAnalysis": false,
-      "inheritEnvironments": [ "msvc_x64_x64" ]
+      "enableMicrosoftCodeAnalysis": true,
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "buildCommandArgs": "-v",
+      "addressSanitizerEnabled": true,
+      "addressSanitizerRuntimeFlags": "check_initialization_order=1:strict_init_order=1:detect_stack_use_after_return=1",
+      "variables": [
+        {
+          "name": "SMALL_VECTOR_FLAGS",
+          "value": "-D_DISABLE_VECTOR_ANNOTATION"
+        }
+      ]
     },
     {
       "name": "x64-Release-msvc",
@@ -62,6 +71,6 @@
       "cmakeCommandArgs": "",
       "ctestCommandArgs": "--output-on-failure --schedule-random",
       "inheritEnvironments": [ "clang_cl_x64_x64" ]
-    },
+    }
   ]
 }

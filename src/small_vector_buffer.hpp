@@ -1,10 +1,9 @@
 #ifndef SMALL_VECTOR_BUFFER_HPP
 #define SMALL_VECTOR_BUFFER_HPP
 
-#include <new> // for hardware_constructive_interference_size
 #include <cstddef> // for size_t
 
-template<typename T, size_t Size, size_t Align = std::hardware_constructive_interference_size>
+template<typename T, size_t Size, size_t Align = 64>
 struct small_vector_buffer
 {
 public:

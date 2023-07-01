@@ -17,10 +17,7 @@ endif()
 
 find_package(Catch2 3 REQUIRED)
 
-file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp")
-file(GLOB_RECURSE TEST_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/*.hpp")
-
-add_executable(small_vector ${TEST_SOURCES} ${TEST_HEADERS})
+add_executable(small_vector "${CMAKE_CURRENT_SOURCE_DIR}/test/small_vector.cpp")
 
 target_include_directories(small_vector PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(small_vector PUBLIC "cxx_std_20")
@@ -29,4 +26,6 @@ target_link_options(small_vector PUBLIC "$<$<CXX_COMPILER_ID:MSVC>:-NATVIS:${CMA
 target_link_libraries(small_vector PRIVATE Catch2::Catch2WithMain)
 
 include(Catch)
+include(CTest)
+enable_testing()
 catch_discover_tests(small_vector)

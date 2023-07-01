@@ -1,6 +1,6 @@
-﻿﻿name: sanitizers
+﻿name: sanitizers
 
-on: [push]
+on: push
 
 jobs:
   build:

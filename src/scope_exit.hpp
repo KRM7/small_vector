@@ -6,7 +6,7 @@
 #include <utility> // for move
 
 template<typename F>
-class scope_exit
+class [[nodiscard]] scope_exit
 {
 public:
     constexpr explicit scope_exit(F on_exit)

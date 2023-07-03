@@ -343,8 +343,8 @@ public:
         }
     }
 
-    void push_back(const T& value) { emplace_back(value); }
-    void push_back(T&& value) { emplace_back(std::move(value)); }
+    void push_back(const T& value) { (void) emplace_back(value); }
+    void push_back(T&& value) { (void) emplace_back(std::move(value)); }
 
     template<typename... Args>
     reference emplace_back(Args&&... args)

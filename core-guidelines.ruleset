@@ -23,6 +23,7 @@
 
 	<!-- Disable rules that are too noisy/not helpful. -->	  
     <Rule Id="C26493" Action="None" /> <!-- Don't use C-style casts. -->
+	<Rule Id="C26490" Action="None" /> <!-- Don't use reinterpret cast. -->
     <Rule Id="C26496" Action="None" /> <!-- The variable 'xyz' is assigned only once, mark it as const. -->
 	<Rule Id="C26814" Action="None" /> <!-- The const variable 'xyz' can be computed at compile time. Use constexpr. -->
     <Rule Id="C26812" Action="None" /> <!-- Prefer 'enum class' over 'enum'. -->

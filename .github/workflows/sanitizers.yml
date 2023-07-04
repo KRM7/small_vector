@@ -31,10 +31,10 @@ jobs:
     - name: setup-compiler
       run: sudo apt update && sudo apt install -y ${{ matrix.pkgs }}
 
-    - name: setup-catch
+    - name: setup-dependencies
       env:
         CXX: ${{ matrix.cxx }}
-      run: sudo bash ./install_catch.sh
+      run: sudo bash ./install_catch.sh && sudo bash ./install_benchmark.sh
 
     - name: setup-build
       env:

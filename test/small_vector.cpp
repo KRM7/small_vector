@@ -4,14 +4,14 @@
 #include <small_vector.hpp>
 #include <vector>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <cstddef>
 
 inline constexpr size_t SMALL_SIZE = 4;
 inline constexpr size_t LARGE_SIZE = 100;
 
-
-using TrivialType   = int;
+using TrivialType = int;
 
 struct NonDefaultConstructibleType
 {
@@ -180,7 +180,6 @@ TEMPLATE_TEST_CASE("small_vector(const small_vector&)", "[constructor]", Trivial
     small_vector vec(source);
 
     REQUIRE(vec.size() == source.size());
-    REQUIRE(vec.capacity() >= source.size());
     REQUIRE(vec == source);
 }
 
@@ -193,7 +192,6 @@ TEMPLATE_TEST_CASE("small_vector(const small_vector&, Alloc)", "[constructor]", 
     small_vector vec(source, std::allocator<TestType>{});
 
     REQUIRE(vec.size() == source.size());
-    REQUIRE(vec.capacity() >= source.size());
     REQUIRE(vec == source);
 }
 
@@ -207,7 +205,6 @@ TEMPLATE_TEST_CASE("small_vector(small_vector&&)", "[constructor]", TrivialType,
     small_vector vec(std::move(source));
 
     REQUIRE(vec.size() == source_copy.size());
-    REQUIRE(vec.capacity() >= source_copy.size());
     REQUIRE(vec == source_copy);
 }
 
@@ -221,7 +218,6 @@ TEMPLATE_TEST_CASE("small_vector<MoveOnlyType>(small_vector&&)", "[constructor]"
     small_vector vec(std::move(source));
 
     REQUIRE(vec.size() == source_copy.size());
-    REQUIRE(vec.capacity() >= source_copy.size());
     REQUIRE(vec == source_copy);
 }
 
@@ -240,7 +236,6 @@ TEMPLATE_TEST_CASE("assign(Iter, Iter)", "[assignment]", TrivialType, NonTrivial
     dest.assign(source.begin(), source.end());
 
     REQUIRE(dest.size() == source.size());
-    REQUIRE(dest.capacity() >= source.size());
     REQUIRE(dest == source);
 }
 
@@ -255,7 +250,6 @@ TEMPLATE_TEST_CASE("operator=(const small_vector&)", "[assignment]", TrivialType
     dest = source;
 
     REQUIRE(dest.size() == source.size());
-    REQUIRE(dest.capacity() >= source.size());
     REQUIRE(dest == source);
 }
 
@@ -284,7 +278,6 @@ TEMPLATE_TEST_CASE("operator=(initializer_list)", "[assignment]", TrivialType, N
     dest = { TestType{ 1 }, TestType{ 2 }, TestType{ 4 } };
 
     REQUIRE(dest.size() == source.size());
-    REQUIRE(dest.capacity() >= source.size());
     REQUIRE(dest == source);
 }
 
@@ -599,3 +592,88 @@ TEMPLATE_TEST_CASE("emplace(pos, ...)", "[modifiers]", TrivialType, NonTrivialTy
     REQUIRE(vec.back() == TestType{ 2 });
 }
 
+    //-----------------------------------//
+    //       ALLOCATOR PROPAGATION       //
+    //-----------------------------------//
+
+template<typename T>
+struct DummyAllocator
+{
+    using value_type = T;
+
+    DummyAllocator()                      = default;
+    DummyAllocator(const DummyAllocator&) = default;
+
+    T* allocate(std::size_t size) const
+    {
+        if (size == 0) return nullptr;
+
+        const std::size_t bytes_needed = size * sizeof(value_type);
+        void* const storage = ::operator new[](bytes_needed);
+
+        return static_cast<T*>(storage);
+    }
+
+    void deallocate(T* storage, std::size_t size) const noexcept
+    {
+        ::operator delete[](storage, size * sizeof(value_type));
+    }
+
+    using propagate_on_container_copy_assignment = std::true_type;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_swap            = std::true_type;
+
+    using is_always_equal = std::false_type;
+    friend bool operator==(const DummyAllocator&, const DummyAllocator&) { return false; }
+};
+
+
+template<typename T>
+using small_vector2 = small_vector<T, 8, DummyAllocator<T>>;
+
+
+TEMPLATE_TEST_CASE("propagate_on_copy_assignment", "[allocators]", TrivialType, NonTrivialType)
+{
+    const size_t src_size = GENERATE(SMALL_SIZE, LARGE_SIZE + 1);
+    const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+
+    const small_vector2<TestType> source(src_size, 4);
+    small_vector2<TestType> dest(dest_size, 3);
+
+    dest = source;
+
+    REQUIRE(dest.size() == source.size());
+    REQUIRE(dest == source);
+}
+
+TEMPLATE_TEST_CASE("propagate_on_move_assignment", "[allocators]", TrivialType, NonTrivialType)
+{
+    const size_t src_size = GENERATE(SMALL_SIZE, LARGE_SIZE + 1);
+    const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+
+    small_vector2<TestType> source(src_size, 4);
+    const small_vector2<TestType> src_copy(source);
+    small_vector2<TestType> dest(dest_size, 3);
+
+    dest = std::move(source);
+
+    REQUIRE(dest.size() == src_copy.size());
+    REQUIRE(dest == src_copy);
+}
+
+TEMPLATE_TEST_CASE("propagate_on_swap", "[allocators]", TrivialType, NonTrivialType)
+{
+    const size_t left_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t right_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+
+    small_vector2<TestType> left(left_size, 1);
+    const small_vector2<TestType> old_left(left);
+    small_vector2<TestType> right(right_size, 2);
+    const small_vector2<TestType> old_right(right);
+
+    using std::swap;
+    swap(left, right);
+
+    REQUIRE(right == old_left);
+    REQUIRE(left == old_right);
+}

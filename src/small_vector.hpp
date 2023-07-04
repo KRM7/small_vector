@@ -186,26 +186,63 @@ public:
 
         if constexpr (std::allocator_traits<A>::propagate_on_container_copy_assignment::value)
         {
-            if (alloc_ != other.alloc_) reset();
-            alloc_ = other.alloc_;
+            if (alloc_ != other.alloc_)
+            {
+                reset();
+                alloc_ = other.alloc_;
+                allocate_n(other.size());
+                detail::construct_range(alloc_, first_, first_ + other.size(), other.first_);
+                last_ = first_ + other.size();
+                return *this;
+            }
         }
         assign(other.begin(), other.end());
 
         return *this;
     }
 
-    small_vector& operator=(small_vector&& other) // TODO
+    small_vector& operator=(small_vector&& other)
     {
         if (std::addressof(other) == this) [[unlikely]] return *this;
 
+        if (!this->is_small() && !other.is_small())
+        {
+            swap(other);
+            return *this;
+        }
+
+        if (this->is_small() && !other.is_small())
+        {
+            detail::destroy_range(alloc_, first_, last_);
+
+            if constexpr (std::allocator_traits<A>::propagate_on_container_move_assignment::value)
+            {
+                alloc_ = std::move(other.alloc_);
+            }
+
+            this->set_storage(other.first_, other.last_, other.last_alloc_);
+            other.set_storage(nullptr, nullptr, nullptr);
+
+            return *this;
+        }
+
         if constexpr (std::allocator_traits<A>::propagate_on_container_move_assignment::value)
         {
-            // swap can be used here
-            if (alloc_ != other.alloc_) reset();
-            alloc_ = std::move(other.alloc_); // how do we deallocate other once the allocator has been moved?
+            if (alloc_ != other.alloc_)
+            {
+                reset();
+                alloc_ = std::move(other.alloc_);
+                allocate_n(other.size());
+                detail::relocate_range_weak(alloc_, other.first_, other.last_, first_);
+                last_ = first_ + other.size();
+                detail::destroy_range(alloc_, other.first_, other.last_);
+                other.last_ = other.first_;
+
+                return *this;
+            }
         }
-        // TODO: assignment can be more efficient here, just swap pointers if the large storage is used
-        assign(std::make_move_iterator(other.begin()), std::make_move_iterator(other.end()));
+
+        assign(std::make_move_iterator(other.first_), std::make_move_iterator(other.last_));
 
         return *this;
     }

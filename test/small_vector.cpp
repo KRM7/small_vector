@@ -261,7 +261,17 @@ TEMPLATE_TEST_CASE("operator=(const small_vector&)", "[assignment]", TrivialType
 
 TEMPLATE_TEST_CASE("operator=(small_vector&&)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    WARN("Not implemented.");
+    const size_t src_size = GENERATE(SMALL_SIZE, LARGE_SIZE + 1);
+    const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+
+    small_vector source(src_size, TestType{ 4 });
+    const small_vector src_copy(source);
+    small_vector dest(dest_size, TestType{ 3 });
+
+    dest = std::move(source);
+
+    REQUIRE(dest.size() == src_copy.size());
+    REQUIRE(dest == src_copy);
 }
 
 TEMPLATE_TEST_CASE("operator=(initializer_list)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)

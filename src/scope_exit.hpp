@@ -1,9 +1,9 @@
-#ifndef SCOPE_EXIT_HPP
-#define SCOPE_EXIT_HPP
+#ifndef SMALL_VECTOR_SCOPE_EXIT_HPP
+#define SMALL_VECTOR_SCOPE_EXIT_HPP
 
-#include <functional> // for invoke
-#include <type_traits> // for is_nothrow_move_constructible
-#include <utility> // for move
+#include <functional>
+#include <type_traits>
+#include <utility>
 
 template<typename F>
 class [[nodiscard]] scope_exit
@@ -14,17 +14,10 @@ public:
         on_exit_(std::move(on_exit))
     {}
 
-    constexpr scope_exit(scope_exit&& other)
-    noexcept(std::is_nothrow_move_constructible_v<F>) :
-        on_exit_(std::move(other.on_exit_)),
-        active_(other.active_)
-    {
-        other.release();
-    }
-
-    scope_exit(const scope_exit& other)            = delete;
-    scope_exit& operator=(const scope_exit& other) = delete;
-    scope_exit& operator=(scope_exit&& other)      = delete;
+    scope_exit(const scope_exit&)            = delete;
+    scope_exit(scope_exit&&)                 = delete;
+    scope_exit& operator=(const scope_exit&) = delete;
+    scope_exit& operator=(scope_exit&&)      = delete;
 
     constexpr ~scope_exit() noexcept
     {
@@ -38,4 +31,4 @@ private:
     bool active_ = true;
 };
 
-#endif // !SCOPE_EXIT_HPP
+#endif // !SMALL_VECTOR_SCOPE_EXIT_HPP

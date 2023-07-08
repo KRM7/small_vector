@@ -1,22 +1,29 @@
 #include <benchmark/benchmark.h>
 #include <small_vector.hpp>
 #include <vector>
+#include <string>
 
 inline constexpr size_t SMALL_SIZE = 4;
 inline constexpr size_t LARGE_SIZE = 100;
+inline constexpr const char* DUMMY_STRING = "long data string for the non trivial type used in the benchmarks";
 
 using TrivialType = int;
 struct NonTrivialType
 {
-    NonTrivialType() {}
-    NonTrivialType(int i) : i_(2 * i + 1) {}
-    NonTrivialType(const NonTrivialType&) {}
-    NonTrivialType(NonTrivialType&&) {}
-    NonTrivialType& operator=(const NonTrivialType&) { return *this; }
-    NonTrivialType& operator=(NonTrivialType&&) { return *this; }
+    NonTrivialType() : data(DUMMY_STRING) {}
+    NonTrivialType(int) : data(DUMMY_STRING) {}
+
+    NonTrivialType(const NonTrivialType& other) : data(other.data) {}
+    NonTrivialType(NonTrivialType&& other) : data(std::move(other.data)) {}
+
+    NonTrivialType& operator=(const NonTrivialType& rhs) { data = rhs.data; return *this; }
+    NonTrivialType& operator=(NonTrivialType&& rhs) { data = std::move(rhs.data); return *this; }
+
     ~NonTrivialType() noexcept {}
+
     friend bool operator==(const NonTrivialType&, const NonTrivialType&) = default;
-    int i_ = 0;
+
+    std::string data;
 };
 
 /* ----------------------------------------------------------------------------------------------------------- */
@@ -62,28 +69,31 @@ BENCHMARK(benchmark_ctor_size_value<small_vector<NonTrivialType>>)->ArgName("siz
 /* ----------------------------------------------------------------------------------------------------------- */
 
 template<typename V>
-void benchmark_fill(benchmark::State& state)
+void benchmark_push_back(benchmark::State& state)
 {
     size_t size = state.range(0);
 
     for (auto _ : state)
     {
         V vec;
-        for (size_t i = 0; i < size; i++) { vec.push_back(1); }
-        benchmark::DoNotOptimize(vec);
+        for (size_t i = 0; i < size; i++)
+        {
+            vec.push_back(1);
+            benchmark::DoNotOptimize(vec);
+        }
     }
 }
 
-BENCHMARK(benchmark_fill<std::vector<TrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_fill<small_vector<TrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_push_back<std::vector<TrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_push_back<small_vector<TrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
 
-BENCHMARK(benchmark_fill<std::vector<NonTrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_fill<small_vector<NonTrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_push_back<std::vector<NonTrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_push_back<small_vector<NonTrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
 
 /* ----------------------------------------------------------------------------------------------------------- */
 
 template<typename V>
-void benchmark_reserve_fill(benchmark::State& state)
+void benchmark_reserve_push_back(benchmark::State& state)
 {
     size_t size = state.range(0);
 
@@ -91,16 +101,19 @@ void benchmark_reserve_fill(benchmark::State& state)
     {
         V vec;
         vec.reserve(size);
-        for (size_t i = 0; i < size; i++) { vec.push_back(1); }
-        benchmark::DoNotOptimize(vec);
+        for (size_t i = 0; i < size; i++)
+        {
+            vec.push_back(1);
+            benchmark::DoNotOptimize(vec);
+        }
     }
 }
 
-BENCHMARK(benchmark_reserve_fill<std::vector<TrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_reserve_fill<small_vector<TrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_reserve_push_back<std::vector<TrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_reserve_push_back<small_vector<TrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
 
-BENCHMARK(benchmark_reserve_fill<std::vector<NonTrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_reserve_fill<small_vector<NonTrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_reserve_push_back<std::vector<NonTrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_reserve_push_back<small_vector<NonTrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
 
 /* ----------------------------------------------------------------------------------------------------------- */
 
@@ -110,11 +123,7 @@ void benchmark_index_operator(benchmark::State& state)
     const size_t size = state.range(0);
     V vec(size, 0);
 
-    for (auto _ : state)
-    {
-        benchmark::DoNotOptimize(vec);
-        benchmark::DoNotOptimize(vec[2]);
-    }
+    for (auto _ : state) { benchmark::DoNotOptimize(vec[2]); }
 }
 
 BENCHMARK(benchmark_index_operator<std::vector<TrivialType>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
@@ -196,8 +205,12 @@ void benchmark_insert(benchmark::State& state)
 
     for (auto _ : state)
     {
-        V vec;
-        for (size_t i = 0; i < size; i++) { vec.insert(vec.begin(), 1); }
+        state.PauseTiming();
+        V vec(size, 1);
+        vec.reserve(size + 1);
+        state.ResumeTiming();
+
+        vec.insert(vec.begin(), 1);
         benchmark::DoNotOptimize(vec);
     }
 }
@@ -217,8 +230,11 @@ void benchmark_erase(benchmark::State& state)
 
     for (auto _ : state)
     {
+        state.PauseTiming();
         V vec(size, 1);
-        for (size_t i = 0; i < size; i++) { vec.erase(vec.begin()); }
+        state.ResumeTiming();
+
+        vec.erase(vec.begin());
         benchmark::DoNotOptimize(vec);
     }
 }

@@ -571,6 +571,40 @@ TEMPLATE_TEST_CASE("insert(pos, T&&)", "[modifiers]", TrivialType, NonTrivialTyp
     }
 }
 
+TEMPLATE_TEST_CASE("insert(pos, iter, iter)", "[modifiers]", TrivialType, NonTrivialType)
+{
+    small_vector dest{ TestType{ 0 }, TestType{ 1 } };
+    const small_vector src{ TestType{ 2 }, TestType{ 3 }, TestType{ 4 } };
+
+    SECTION("front")
+    {
+        dest.insert(dest.begin(), src.begin(), src.end());
+        REQUIRE(dest == small_vector{ TestType{ 2 }, TestType{ 3 }, TestType{ 4 }, TestType{ 0 }, TestType{ 1 } });
+    }
+    SECTION("back")
+    {
+        dest.insert(dest.end(), src.begin(), src.end());
+        REQUIRE(dest == small_vector{ TestType{ 0 }, TestType{ 1 }, TestType{ 2 }, TestType{ 3 }, TestType{ 4 } });
+    }
+    SECTION("middle")
+    {
+        dest.insert(dest.begin() + 1, src.begin(), src.end());
+        REQUIRE(dest == small_vector{ TestType{ 0 }, TestType{ 2 }, TestType{ 3 }, TestType{ 4 }, TestType{ 1 } });
+    }
+    SECTION("empty")
+    {
+        dest.insert(dest.end(), src.begin(), src.begin());
+        REQUIRE(dest == small_vector{ TestType{ 0 }, TestType{ 1 } });
+    }
+    SECTION("many")
+    {
+        for (size_t i = 0; i < 100; i++) dest.insert(dest.begin(), src.begin(), src.end());
+        REQUIRE(dest.size() == 100 * src.size() + 2);
+        REQUIRE(dest.front() == TestType{ 2 });
+        REQUIRE(dest.back() == TestType{ 1 });
+    }
+}
+
 TEMPLATE_TEST_CASE("emplace(pos, ...)", "[modifiers]", TrivialType, NonTrivialType, MoveOnlyType)
 {
     small_vector<TestType> vec(2);

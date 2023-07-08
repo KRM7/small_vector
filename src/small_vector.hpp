@@ -1,25 +1,298 @@
-#ifndef SMALL_VECTOR_HPP
-#define SMALL_VECTOR_HPP
+#ifndef SMALL_VECTOR_SMALL_VECTOR_HPP
+#define SMALL_VECTOR_SMALL_VECTOR_HPP
 
-#include "small_vector_traits.hpp" // has_trivial_allocate
-#include "small_vector_buffer.hpp" // for small_vector_buffer
-#include "small_vector_memory.hpp" // for destroy_range
-#include "scope_exit.hpp" // for scope_exit
-#include <memory> // for allocator, allocator_traits
-#include <new> // for bad_array_new_length
-#include <iterator> // for reverse_iterator, iterator concepts, make_move_iterator
-#include <initializer_list> // for initializer_list
-#include <type_traits> // for is_nothrow_default_constructible
-#include <utility> // for move, swap
-#include <cstddef> // for size_t, ptrdiff_t
-#include <cstdlib> // for calloc
-#include <cassert> // for assert
-#include <stdexcept> // for out_of_range, bad_alloc
-#include <numbers> // for phi
-#include <algorithm> // for swap_ranges, equal, lexicographical_compare_three_way
+#include "scope_exit.hpp"
+#include <algorithm>
+#include <iterator>
+#include <initializer_list>
+#include <memory>
+#include <new>
+#include <type_traits>
+#include <utility>
+#include <stdexcept>
+#include <cmath>
+#include <cstring>
+#include <cstdlib>
+#include <cstddef>
+#include <cassert>
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#   define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#elif __has_cpp_attribute(no_unique_address)
+#   define NO_UNIQUE_ADDRESS [[no_unique_address]]
+#else
+#   define NO_UNIQUE_ADDRESS
+#endif
+
+namespace detail
+{
+    //----------------------------------------- HELPER TYPE TRAITS ---------------------------------------------------
+
+    template<typename Allocator>
+    using alloc_pointer_t = typename std::allocator_traits<Allocator>::pointer;
+
+    template<typename Allocator>
+    using alloc_size_t = typename std::allocator_traits<Allocator>::size_type;
 
 
-template<typename T, std::size_t Size = 8, typename A = std::allocator<T>>
+    // 'Allocator' has a trivial construct method for the type 'T' with the arguments 'TArgs'
+    // if calling allocator_traits<Allocator>::construct is equivalent to directly calling the
+    // constructor of T
+    template<typename Allocator, typename T, typename... Args>
+    concept has_construct_method = requires { std::declval<Allocator>().construct(std::declval<T*>(), std::declval<Args>()...); };
+
+    template<typename Allocator, typename T, typename... Args>
+    inline constexpr bool has_trivial_construct_v = !has_construct_method<Allocator, T, Args...>;
+
+    // 'Allocator' has a trivial destroy method for the type 'T' if calling
+    // allocator_traits<Allocator>::destroy is equivalent to directly calling the
+    // destructor of T
+    template<typename Allocator, typename T>
+    concept has_destroy_method = requires { std::declval<Allocator>().destroy(std::declval<T*>()); };
+
+    template<typename Allocator, typename T>
+    inline constexpr bool has_trivial_destroy_v = !has_destroy_method<Allocator, T>;
+
+
+    // If 'Allocator' is replaceable, its allocation methods will be replaced with malloc() and free().
+    template<typename Allocator>
+    struct is_replaceable_allocator : std::false_type {};
+
+    template<typename T>
+    struct is_replaceable_allocator<std::allocator<T>> : std::true_type {};
+
+    template<typename Allocator>
+    inline constexpr bool is_replaceable_allocator_v = is_replaceable_allocator<Allocator>::value;
+
+
+    // The type 'T' is considered trivially relocatable if its move construction and move assignment
+    // can be replaced with memcpy()/memmove().
+    template<typename T>
+    struct is_trivially_relocatable :
+        std::conjunction<std::is_trivially_move_constructible<T>, std::is_trivially_move_assignable<T>, std::is_trivially_destructible<T>>
+    {};
+
+    template<typename T>
+    inline constexpr bool is_trivially_relocatable_v = is_trivially_relocatable<T>::value;
+
+
+    //----------------------------------------- ALLOCATE / DEALLOCATE ---------------------------------------------------
+
+    template<typename T, typename A>
+    constexpr alloc_pointer_t<A> allocate(A& allocator, alloc_size_t<A> count)
+    {
+        if constexpr (is_replaceable_allocator_v<A>)
+        {
+            auto p = (alloc_pointer_t<A>) std::malloc(sizeof(T) * count);
+            if (!p) throw std::bad_alloc{};
+            return p;
+        }
+        else { return std::allocator_traits<A>::allocate(allocator, count); }
+    }
+
+    template<typename A>
+    constexpr void deallocate(A& allocator, alloc_pointer_t<A> data, alloc_size_t<A> count) noexcept
+    {
+        if constexpr (is_replaceable_allocator_v<A>)
+        {
+            std::free(data);
+        }
+        else { std::allocator_traits<A>::deallocate(allocator, data, count); }
+    }
+
+    //--------------------------- CONSTRUCT / DESTROY ONE IN UNINITIALIZED MEMORY ---------------------------------------
+
+    template<typename T, typename A>
+    constexpr void destroy(A& allocator, T* at) noexcept
+    {
+        if constexpr (!std::is_trivially_destructible_v<T> || !has_trivial_destroy_v<A, T>)
+        {
+            std::allocator_traits<A>::destroy(allocator, at);
+        }
+    }
+
+    // default construct
+    template<typename T, typename A>
+    constexpr void construct(A& allocator, T* at)
+    noexcept(std::is_nothrow_default_constructible_v<T> && has_trivial_construct_v<A, T>)
+    {
+        if constexpr (std::is_trivially_default_constructible_v<T> && has_trivial_construct_v<A, T>)
+        {
+            std::memset(at, 0, sizeof(T));
+        }
+        else { std::allocator_traits<A>::construct(allocator, at); }
+    }
+
+    // copy consruct
+    template<typename T, typename A>
+    constexpr void construct(A& allocator, T* at, const T& from)
+    noexcept(std::is_nothrow_copy_constructible_v<T> && has_trivial_construct_v<A, T, const T&>)
+    {
+        if constexpr (std::is_trivially_copy_constructible_v<T> && has_trivial_construct_v<A, T, const T&>)
+        {
+            std::memcpy(at, std::addressof(from), sizeof(T));
+        }
+        else { std::allocator_traits<A>::construct(allocator, at, from); }
+    }
+
+    // move construct
+    template<typename T, typename A>
+    constexpr void construct(A& allocator, T* at, T&& from)
+    noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
+    {
+        if constexpr (std::is_trivially_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
+        {
+            std::memcpy(at, std::addressof(from), sizeof(T));
+        }
+        else { std::allocator_traits<A>::construct(allocator, at, std::move(from)); }
+    }
+
+    // construct from args
+    template<typename T, typename A, typename TArg, typename... TArgs>
+    constexpr void construct(A& allocator, T* at, TArg&& arg, TArgs&&... args)
+    noexcept(std::is_nothrow_constructible_v<T, TArg, TArgs...> && has_trivial_construct_v<A, TArg, TArgs...>)
+    {
+        std::allocator_traits<A>::construct(allocator, at, std::forward<TArg>(arg), std::forward<TArgs>(args)...);
+    }
+
+    //--------------------------- CONSTRUCT / DESTROY RANGE IN UNINITIALIZED MEMORY ---------------------------------------
+
+    template<typename T, typename A>
+    constexpr void destroy_range(A& allocator, T* first, T* last) noexcept
+    {
+        for (; first != last; ++first) detail::destroy(allocator, first);
+    }
+
+    // default construct
+    template<typename T, typename A>
+    constexpr void construct_range(A& allocator, T* first, T* last)
+    noexcept(std::is_nothrow_default_constructible_v<T> && has_trivial_construct_v<A, T>)
+    {
+        if constexpr (std::is_trivially_default_constructible_v<T> && has_trivial_construct_v<A, T>)
+        {
+            std::memset(first, 0, sizeof(T) * (last - first));
+        }
+        else
+        {
+            T* next = first;
+            scope_exit guard{ [&] { detail::destroy_range(allocator, first, next); } };
+            for (; next != last; ++next) detail::construct(allocator, next);
+            guard.release();
+        }
+    }
+
+    // copy construct
+    template<typename T, typename A>
+    constexpr void construct_range(A& allocator, T* first, T* last, const T& val)
+    noexcept(noexcept(detail::construct(allocator, first, val)))
+    {
+        T* next = first;
+        scope_exit guard{ [&] { detail::destroy_range(allocator, first, next); } };
+        for (; next != last; ++next) detail::construct(allocator, next, val);
+        guard.release();
+    }
+
+    // construct from range
+    template<typename T, typename A, std::forward_iterator Iter>
+    constexpr void construct_range(A& allocator, T* first, T* last, Iter src_first)
+    noexcept(noexcept(detail::construct(allocator, first, *src_first)))
+    {
+        using R = std::iter_reference_t<Iter>;
+
+        if constexpr (std::contiguous_iterator<Iter> && std::is_trivially_constructible_v<T, R> && has_trivial_construct_v<A, T, R>)
+        {
+            std::memcpy(first, std::addressof(*src_first), sizeof(T) * (last - first));
+        }
+        else
+        {
+            T* next = first;
+            scope_exit guard{ [&] { detail::destroy_range(allocator, first, next); } };
+            for (; next != last; ++next, ++src_first) detail::construct(allocator, next, *src_first);
+            guard.release();
+        }
+    }
+
+    // move construct from another range if noexcept
+    template<typename T, typename A>
+    constexpr void relocate_range_strong(A& allocator, T* first, T* last, T* dest)
+    noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
+    {
+        if constexpr (is_trivially_relocatable_v<T> && has_trivial_construct_v<A, T, T&&>)
+        {
+            std::memcpy(dest, first, sizeof(T) * (last - first));
+        }
+        else
+        {
+            T* next = dest;
+            scope_exit guard{ [&] { detail::destroy_range(allocator, dest, next); } };
+            for (; first != last; ++first, ++next) detail::construct(allocator, next, std::move_if_noexcept(*first));
+            guard.release();
+        }
+    }
+
+    // move construct from another range
+    template<typename T, typename A>
+    constexpr void relocate_range_weak(A& allocator, T* first, T* last, T* dest)
+    noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
+    {
+        if constexpr (is_trivially_relocatable_v<T> && has_trivial_construct_v<A, T, T&&>)
+        {
+            std::memcpy(dest, first, sizeof(T) * (last - first));
+        }
+        else
+        {
+            T* next = dest;
+            scope_exit guard{ [&] { detail::destroy_range(allocator, dest, next); } };
+            for (; first != last; ++first, ++next) detail::construct(allocator, next, std::move(*first));
+            guard.release();
+        }
+    }
+
+
+    //--------------------------------------- SMALL VECTOR BUFFER -------------------------------------------------------
+
+    inline constexpr std::size_t cache_line_size = 64;
+
+    template<typename T, size_t Size, size_t Align = cache_line_size>
+    struct small_vector_buffer
+    {
+    public:
+        auto begin() noexcept { return reinterpret_cast<T*>(&data_); }
+        auto begin() const noexcept { return reinterpret_cast<const T*>(&data_); }
+
+        auto end() noexcept { return reinterpret_cast<T*>(&data_) + Size; }
+        auto end() const noexcept { return reinterpret_cast<const T*>(&data_) + Size; }
+
+        constexpr size_t size() const noexcept { return Size; }
+
+    private:
+        inline constexpr static size_t align_req = (alignof(T) > Align) ? alignof(T) : Align;
+        inline constexpr static size_t buffer_size = sizeof(T) * Size;
+
+        using storage_type = unsigned char[buffer_size];
+
+        alignas(align_req) storage_type data_;
+    };
+
+
+    template<typename T>
+    struct default_small_size
+    {
+    private:
+        inline constexpr static size_t overall_size = cache_line_size;
+        inline constexpr static size_t buffer_size = overall_size - 3 * sizeof(T*);
+        inline constexpr static size_t buffer_min_count = 4;
+    public:
+        inline constexpr static size_t value = std::max(buffer_min_count, buffer_size / sizeof(T));
+    };
+
+    template<typename T>
+    inline constexpr size_t default_small_size_v = default_small_size<T>::value;
+
+} // namespace detail
+
+
+template<typename T, size_t Size = detail::default_small_size_v<T>, typename A = std::allocator<T>>
 class small_vector
 {
 public:
@@ -42,23 +315,19 @@ public:
     //-----------------------------------//
 
     small_vector() noexcept(std::is_nothrow_default_constructible_v<A>) :
-        buffer_(),
         first_(buffer_.begin()),
-        last_(first_),
-        last_alloc_(buffer_.end()),
-        alloc_()
+        last_(buffer_.begin()),
+        last_alloc_(buffer_.end())
     {}
 
     explicit small_vector(const A& allocator) noexcept(std::is_nothrow_copy_constructible_v<A>) :
-        buffer_(),
         first_(buffer_.begin()),
-        last_(first_),
+        last_(buffer_.begin()),
         last_alloc_(buffer_.end()),
         alloc_(allocator)
     {}
 
     explicit small_vector(size_type count, const A& allocator = {}) :
-        buffer_(),
         alloc_(allocator)
     {
         allocate_n(count);
@@ -69,7 +338,6 @@ public:
     }
 
     small_vector(size_type count, const T& value, const A& allocator = {}) :
-        buffer_(),
         alloc_(allocator)
     {
         allocate_n(count);
@@ -81,7 +349,6 @@ public:
 
     template<std::forward_iterator Iter>
     small_vector(Iter src_first, Iter src_last, const A& allocator = {}) :
-        buffer_(),
         alloc_(allocator)
     {
         const auto src_len = std::distance(src_first, src_last);
@@ -104,8 +371,7 @@ public:
         small_vector(other.begin(), other.end(), allocator)
     {}
 
-    small_vector(small_vector&& other) noexcept(std::is_trivially_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>) :
-        buffer_(),
+    small_vector(small_vector&& other) noexcept(std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A, T, T&&>) :
         alloc_(std::move(other.alloc_))
     {
         if (other.is_small())
@@ -146,24 +412,17 @@ public:
 
         if (capacity() >= size_type(src_size))
         {
-            if (old_size < src_size)
-            {
-                detail::assign_range(first_, last_, src_first);
-                detail::construct_range(alloc_, last_, first_ + src_size, src_first + old_size);
-            }
-            else if (old_size >= src_size)
-            {
-                detail::assign_range(first_, first_ + src_size, src_first);
-                detail::destroy_range(alloc_, first_ + src_size, last_);
-            }
+            std::copy(src_first, src_first + std::min(old_size, src_size), first_);
+            if (old_size < src_size) detail::construct_range(alloc_, first_ + old_size, first_ + src_size, src_first + old_size);
+            else if (old_size > src_size) detail::destroy_range(alloc_, first_ + src_size, last_);
             last_ = first_ + src_size;
         }
-        else if (!is_small() && is_trivially_relocatable_v<T> && is_replaceable_allocator_v<A>)
+        else if (!is_small() && detail::is_trivially_relocatable_v<T> && detail::is_replaceable_allocator_v<A>)
         {
             pointer new_first = (pointer) std::realloc(first_, sizeof(T) * src_size);
             if (!new_first) throw std::bad_alloc{};
             scope_exit guard{ [&] { std::free(new_first); } };
-            detail::assign_range(new_first, new_first + old_size, src_first);
+            std::copy(src_first, src_first + old_size, new_first);
             detail::construct_range(alloc_, new_first + old_size, new_first + src_size, src_first + old_size);
             guard.release();
             set_storage(new_first, src_size, src_size);
@@ -197,7 +456,6 @@ public:
             }
         }
         assign(other.begin(), other.end());
-
         return *this;
     }
 
@@ -210,22 +468,14 @@ public:
             swap(other);
             return *this;
         }
-
         if (this->is_small() && !other.is_small())
         {
             detail::destroy_range(alloc_, first_, last_);
-
-            if constexpr (std::allocator_traits<A>::propagate_on_container_move_assignment::value)
-            {
-                alloc_ = std::move(other.alloc_);
-            }
-
+            if constexpr (std::allocator_traits<A>::propagate_on_container_move_assignment::value) { alloc_ = std::move(other.alloc_); }
             this->set_storage(other.first_, other.last_, other.last_alloc_);
             other.set_storage(nullptr, nullptr, nullptr);
-
             return *this;
         }
-
         if constexpr (std::allocator_traits<A>::propagate_on_container_move_assignment::value)
         {
             if (alloc_ != other.alloc_)
@@ -237,13 +487,10 @@ public:
                 last_ = first_ + other.size();
                 detail::destroy_range(alloc_, other.first_, other.last_);
                 other.last_ = other.first_;
-
                 return *this;
             }
         }
-
         assign(std::make_move_iterator(other.first_), std::make_move_iterator(other.last_));
-
         return *this;
     }
 
@@ -273,33 +520,32 @@ public:
     const_reverse_iterator rend() const noexcept { return std::make_reverse_iterator(first_); }
     const_reverse_iterator crend() const noexcept { return std::make_reverse_iterator(first_); }
 
-
     //-----------------------------------//
     //           ELEMENT ACCESS          //
     //-----------------------------------//
 
-    reference operator[](size_type i)
+    reference operator[](size_type pos)
     {
-        assert(i < size());
-        return first_[i];
+        assert(pos < size());
+        return first_[pos];
     }
 
-    const_reference operator[](size_type i) const
+    const_reference operator[](size_type pos) const
     {
-        assert(i < size());
-        return first_[i];
+        assert(pos < size());
+        return first_[pos];
     }
      
-    reference at(size_type i)
+    reference at(size_type pos)
     {
-        if (i >= size()) throw std::out_of_range{ "Bad vector index." };
-        return first_[i];
+        if (pos >= size()) throw std::out_of_range{ "Bad vector index." };
+        return first_[pos];
     }
 
-    const_reference at(size_type i) const
+    const_reference at(size_type pos) const
     {
-        if (i >= size()) throw std::out_of_range{ "Bad vector index." };
-        return first_[i];
+        if (pos >= size()) throw std::out_of_range{ "Bad vector index." };
+        return first_[pos];
     }
 
     reference front() noexcept { assert(!empty()); return *first_; }
@@ -336,7 +582,7 @@ public:
     }
 
     void swap(small_vector& other)
-    noexcept(std::is_nothrow_swappable_v<T> && std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
+    noexcept(std::is_nothrow_swappable_v<T> && std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A, T, T&&>)
     {
         if (std::addressof(other) == this) [[unlikely]] return;
 
@@ -380,8 +626,8 @@ public:
         }
     }
 
-    void push_back(const T& value) { (void) emplace_back(value); }
-    void push_back(T&& value) { (void) emplace_back(std::move(value)); }
+    void push_back(const T& value) { emplace_back(value); }
+    void push_back(T&& value) { emplace_back(std::move(value)); }
 
     template<typename... Args>
     reference emplace_back(Args&&... args)
@@ -400,34 +646,51 @@ public:
 
     iterator insert(const_iterator pos, const T& value) { return emplace(pos, value); }
     iterator insert(const_iterator pos, T&& value) { return emplace(pos, std::move(value)); }
+    iterator insert(const_iterator pos, std::initializer_list<T> list) { return insert(pos, list.begin(), list.end()); }
+    iterator erase(const_iterator pos) { assert(pos != end()); return erase(pos, pos + 1); }
 
     template<typename... Args>
     iterator emplace(const_iterator pos, Args&&... args)
     {
         assert(!( memcontains(args) || ... ));
 
-        if (pos == cend())
-        {
-            emplace_back(std::forward<Args>(args)...);
-            return last_ - 1;
-        }
+        if (pos == cend()) return std::addressof(emplace_back(std::forward<Args>(args)...));
 
-        difference_type offset = std::distance(cbegin(), pos);
+        const difference_type offset = std::distance(cbegin(), pos);
         if (size() == capacity()) reallocate_n(next_capacity());
         detail::construct(alloc_, last_, std::move(back()));
-        last_++;
-        std::move_backward(first_ + offset, last_ - 2, last_ - 1);
-        *(first_ + offset) = T(std::forward<Args>(args)...);
+        std::shift_right(first_ + offset, last_++, 1);
+        *(first_ + offset) = T{ std::forward<Args>(args)... }; // ignore allocator
         return first_ + offset;
     }
 
-    iterator erase(const_iterator pos) { assert(pos != end()); return erase(pos, pos + 1); }
-
-    iterator erase(const_iterator first, const_iterator last)
+    template<std::forward_iterator Iter>
+    iterator insert(const_iterator pos, Iter src_first, Iter src_last)
     {
-        pointer first_erased = first_ + std::distance(cbegin(), first);
-        pointer last_erased  = first_ + std::distance(cbegin(), last);
-        pointer new_last = std::move(last_erased, last_, first_erased);
+        const auto offset = std::distance(cbegin(), pos);
+        const auto src_size = std::distance(src_first, src_last);
+
+        reserve(size() + src_size);
+
+        const auto middle = std::max(last_ - src_size, first_ + offset);
+        const auto moved_size = last_ - middle;
+        const auto new_last = last_ + src_size;
+        const auto new_middle = last_ + src_size - moved_size;
+
+        detail::relocate_range_weak(alloc_, middle, last_, new_middle);
+        scope_exit guard{ [&] { detail::destroy_range(alloc_, new_middle, new_last); } };
+        detail::construct_range(alloc_, last_, new_middle, src_first + moved_size);
+        guard.release();
+        last_ = new_last;
+        std::copy(src_first, src_first + moved_size, middle);
+
+        return first_ + offset;
+    }
+
+    iterator erase(const_iterator first, const_iterator last) noexcept(std::is_nothrow_move_assignable_v<T>)
+    {
+        const pointer first_erased = first_ + std::distance(cbegin(), first);
+        const pointer new_last = std::shift_left(first_erased, last_, std::distance(first, last));
         detail::destroy_range(alloc_, new_last, std::exchange(last_, new_last));
         return first_erased;
     }
@@ -436,7 +699,7 @@ public:
     //               OTHER               //
     //-----------------------------------//
 
-    allocator_type get_allocator() const { return alloc_; }
+    allocator_type get_allocator() const noexcept(std::is_nothrow_copy_constructible_v<A>) { return alloc_; }
 
     friend bool operator==(const small_vector& lhs, const small_vector& rhs) noexcept
     {
@@ -450,13 +713,13 @@ public:
 
 private:
 
-    small_vector_buffer<T, Size> buffer_; // TODO: default buffer size calculations for template param
+    detail::small_vector_buffer<T, Size> buffer_;
     pointer first_      = nullptr;
     pointer last_       = nullptr;
     pointer last_alloc_ = nullptr;
     NO_UNIQUE_ADDRESS allocator_type alloc_;
 
-    static inline constexpr double growth_factor_ = std::numbers::phi;
+    static inline constexpr double growth_factor_ = 1.618;
 
 
     void allocate_n(size_type count)
@@ -478,7 +741,7 @@ private:
 
         const size_type old_size = size();
 
-        if (!is_small() && is_trivially_relocatable_v<T> && is_replaceable_allocator_v<A>)
+        if (!is_small() && detail::is_trivially_relocatable_v<T> && detail::is_replaceable_allocator_v<A>)
         {
             pointer new_first = (pointer) std::realloc(first_, sizeof(T) * new_capacity);
             if (!new_first) throw std::bad_alloc{};
@@ -515,7 +778,6 @@ private:
         {
             detail::destroy_range(alloc_, first_ + count, last_);
             last_ = first_ + count;
-            return;
         }
         else if (count > size())
         {
@@ -534,16 +796,12 @@ private:
 
     void set_storage(pointer first, size_type size, size_type capacity) noexcept
     {
-        first_ = first;
-        last_ = first + size;
-        last_alloc_ = first + capacity;
+        set_storage(first, first + size, first + capacity);
     }
 
     void set_buffer_storage(size_type size) noexcept
     {
-        first_ = buffer_.begin();
-        last_ = buffer_.begin() + size;
-        last_alloc_ = buffer_.end();
+        set_storage(buffer_.begin(), buffer_.begin() + size, buffer_.end());
     }
 
     size_type next_capacity() const noexcept
@@ -558,7 +816,7 @@ private:
 
 }; // class small_vector
 
-template<std::forward_iterator Iter, std::size_t Size = 8 /* TODO: default */, typename Alloc = std::allocator<std::iter_value_t<Iter>>>
+template<std::forward_iterator Iter, std::size_t Size = detail::default_small_size_v<std::iter_value_t<Iter>>, typename Alloc = std::allocator<std::iter_value_t<Iter>>>
 small_vector(Iter, Iter, Alloc = {}) -> small_vector<std::iter_value_t<Iter>, Size, Alloc>;
 
 template<typename T, std::size_t Size, typename A>
@@ -568,4 +826,4 @@ noexcept(noexcept(lhs.swap(rhs)))
     lhs.swap(rhs);
 }
 
-#endif // !SMALL_VECTOR_HPP
+#endif // !SMALL_VECTOR_SMALL_VECTOR_HPP

@@ -17,11 +17,11 @@
 #include <cassert>
 
 #if defined(_MSC_VER) && !defined(__clang__)
-#   define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#   define SV_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
 #elif __has_cpp_attribute(no_unique_address)
-#   define NO_UNIQUE_ADDRESS [[no_unique_address]]
+#   define SV_NO_UNIQUE_ADDRESS [[no_unique_address]]
 #else
-#   define NO_UNIQUE_ADDRESS
+#   define SV_NO_UNIQUE_ADDRESS
 #endif
 
 namespace detail
@@ -148,11 +148,11 @@ namespace detail
     }
 
     // construct from args
-    template<typename T, typename A, typename TArg, typename... TArgs>
-    constexpr void construct(A& allocator, T* at, TArg&& arg, TArgs&&... args)
-    noexcept(std::is_nothrow_constructible_v<T, TArg, TArgs...> && has_trivial_construct_v<A, TArg, TArgs...>)
+    template<typename T, typename A, typename... Args>
+    constexpr void construct(A& allocator, T* at, Args&&... args)
+    noexcept(std::is_nothrow_constructible_v<T, Args...> && has_trivial_construct_v<A, Args...>)
     {
-        std::allocator_traits<A>::construct(allocator, at, std::forward<TArg>(arg), std::forward<TArgs>(args)...);
+        std::allocator_traits<A>::construct(allocator, at, std::forward<Args>(args)...);
     }
 
     //--------------------------- CONSTRUCT / DESTROY RANGE IN UNINITIALIZED MEMORY ---------------------------------------
@@ -246,6 +246,15 @@ namespace detail
             for (; first != last; ++first, ++next) detail::construct(allocator, next, std::move(*first));
             guard.release();
         }
+    }
+
+    //---------------------------------------- ASSIGNMENT METHODS -------------------------------------------------------
+
+    template<typename T, std::forward_iterator Iter>
+    constexpr void assign_range(T* first, T* last, Iter src_first)
+    noexcept(std::is_nothrow_assignable_v<T&, decltype(*src_first)>)
+    {
+        (void) std::copy(src_first, src_first + std::distance(first, last), first);
     }
 
 
@@ -412,7 +421,7 @@ public:
 
         if (capacity() >= size_type(src_size))
         {
-            std::copy(src_first, src_first + std::min(old_size, src_size), first_);
+            detail::assign_range(first_, first_ + std::min(old_size, src_size), src_first);
             if (old_size < src_size) detail::construct_range(alloc_, first_ + old_size, first_ + src_size, src_first + old_size);
             else if (old_size > src_size) detail::destroy_range(alloc_, first_ + src_size, last_);
             last_ = first_ + src_size;
@@ -422,7 +431,7 @@ public:
             pointer new_first = (pointer) std::realloc(first_, sizeof(T) * src_size);
             if (!new_first) throw std::bad_alloc{};
             scope_exit guard{ [&] { std::free(new_first); } };
-            std::copy(src_first, src_first + old_size, new_first);
+            detail::assign_range(new_first, new_first + old_size, src_first);
             detail::construct_range(alloc_, new_first + old_size, new_first + src_size, src_first + old_size);
             guard.release();
             set_storage(new_first, src_size, src_size);
@@ -524,13 +533,13 @@ public:
     //           ELEMENT ACCESS          //
     //-----------------------------------//
 
-    reference operator[](size_type pos)
+    reference operator[](size_type pos) noexcept
     {
         assert(pos < size());
         return first_[pos];
     }
 
-    const_reference operator[](size_type pos) const
+    const_reference operator[](size_type pos) const noexcept
     {
         assert(pos < size());
         return first_[pos];
@@ -581,6 +590,13 @@ public:
         last_ = first_;
     }
 
+    void reset() noexcept
+    {
+        detail::destroy_range(alloc_, first_, last_);
+        deallocate();
+        set_buffer_storage(0);
+    }
+
     void swap(small_vector& other)
     noexcept(std::is_nothrow_swappable_v<T> && std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A, T, T&&>)
     {
@@ -597,7 +613,7 @@ public:
         {
             small_vector& big   = (this->size() < other.size()) ? other : *this;
             small_vector& small = (this->size() < other.size()) ? *this : other;
-            const size_type small_size = small.size();
+            const auto small_size = small.size();
 
             std::swap_ranges(small.first_, small.last_, big.first_);
             detail::relocate_range_strong(small.alloc_, big.first_ + small.size(), big.last_, small.last_);
@@ -610,7 +626,7 @@ public:
         {
             small_vector& big   = this->is_small() ? other : *this;
             small_vector& small = this->is_small() ? *this : other;
-            const size_type small_size = small.size();
+            const auto small_size = small.size();
 
             detail::relocate_range_strong(big.alloc_, small.first_, small.last_, big.buffer_.begin());
             detail::destroy_range(small.alloc_, small.first_, small.last_);
@@ -647,7 +663,7 @@ public:
     iterator insert(const_iterator pos, const T& value) { return emplace(pos, value); }
     iterator insert(const_iterator pos, T&& value) { return emplace(pos, std::move(value)); }
     iterator insert(const_iterator pos, std::initializer_list<T> list) { return insert(pos, list.begin(), list.end()); }
-    iterator erase(const_iterator pos) { assert(pos != end()); return erase(pos, pos + 1); }
+    iterator erase(const_iterator pos) noexcept(std::is_nothrow_move_assignable_v<T>) { assert(pos != end()); return erase(pos, pos + 1); }
 
     template<typename... Args>
     iterator emplace(const_iterator pos, Args&&... args)
@@ -656,7 +672,7 @@ public:
 
         if (pos == cend()) return std::addressof(emplace_back(std::forward<Args>(args)...));
 
-        const difference_type offset = std::distance(cbegin(), pos);
+        const auto offset = std::distance(cbegin(), pos);
         if (size() == capacity()) reallocate_n(next_capacity());
         detail::construct(alloc_, last_, std::move(back()));
         std::shift_right(first_ + offset, last_++, 1);
@@ -674,25 +690,27 @@ public:
 
         const auto middle = std::max(last_ - src_size, first_ + offset);
         const auto moved_size = last_ - middle;
-        const auto new_last = last_ + src_size;
+        const auto new_last   = last_ + src_size;
         const auto new_middle = last_ + src_size - moved_size;
 
         detail::relocate_range_weak(alloc_, middle, last_, new_middle);
         scope_exit guard{ [&] { detail::destroy_range(alloc_, new_middle, new_last); } };
+        detail::assign_range(middle, last_, src_first);
         detail::construct_range(alloc_, last_, new_middle, src_first + moved_size);
-        guard.release();
         last_ = new_last;
-        std::copy(src_first, src_first + moved_size, middle);
+        guard.release();
 
         return first_ + offset;
     }
 
     iterator erase(const_iterator first, const_iterator last) noexcept(std::is_nothrow_move_assignable_v<T>)
     {
-        const pointer first_erased = first_ + std::distance(cbegin(), first);
-        const pointer new_last = std::shift_left(first_erased, last_, std::distance(first, last));
-        detail::destroy_range(alloc_, new_last, std::exchange(last_, new_last));
-        return first_erased;
+        const auto erase_first = first_ + std::distance(cbegin(), first);
+        const auto erase_count = std::distance(first, last);
+        const auto new_last = std::shift_left(erase_first, last_, erase_count);
+        detail::destroy_range(alloc_, new_last, last_);
+        last_ = new_last;
+        return erase_first;
     }
 
     //-----------------------------------//
@@ -717,7 +735,7 @@ private:
     pointer first_      = nullptr;
     pointer last_       = nullptr;
     pointer last_alloc_ = nullptr;
-    NO_UNIQUE_ADDRESS allocator_type alloc_;
+    SV_NO_UNIQUE_ADDRESS allocator_type alloc_;
 
     static inline constexpr double growth_factor_ = 1.618;
 
@@ -762,13 +780,6 @@ private:
     void deallocate() noexcept
     {
         if (!is_small() && data()) detail::deallocate(alloc_, first_, capacity());
-    }
-
-    void reset() noexcept
-    {
-        detail::destroy_range(alloc_, first_, last_);
-        deallocate();
-        set_buffer_storage(0);
     }
 
     template<typename... Args>

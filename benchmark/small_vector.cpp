@@ -32,7 +32,7 @@ void benchmark_ctor_size_value(benchmark::State& state)
 
     for (auto _ : state)
     {
-        V vec(size, 0);
+        V vec(size, 2);
         benchmark::DoNotOptimize(vec);
     }
 }

@@ -635,9 +635,6 @@ struct DummyAllocator
 {
     using value_type = T;
 
-    DummyAllocator()                      = default;
-    DummyAllocator(const DummyAllocator&) = default;
-
     T* allocate(std::size_t size) const
     {
         if (size == 0) return nullptr;

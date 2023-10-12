@@ -125,7 +125,7 @@ namespace detail
 
     // copy consruct
     template<typename T, typename A>
-    constexpr void construct(A& allocator, T* at, const T& from)
+    constexpr void construct(A& allocator, T* at, const std::type_identity_t<T>& from)
     noexcept(std::is_nothrow_copy_constructible_v<T> && has_trivial_construct_v<A, T, const T&>)
     {
         if constexpr (std::is_trivially_copy_constructible_v<T> && has_trivial_construct_v<A, T, const T&>)
@@ -137,7 +137,7 @@ namespace detail
 
     // move construct
     template<typename T, typename A>
-    constexpr void construct(A& allocator, T* at, T&& from)
+    constexpr void construct(A& allocator, T* at, std::type_identity_t<T>&& from)
     noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
     {
         if constexpr (std::is_trivially_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)

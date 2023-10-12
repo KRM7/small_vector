@@ -54,17 +54,6 @@ namespace detail
     inline constexpr bool has_trivial_destroy_v = !has_destroy_method<Allocator, T>;
 
 
-    // If 'Allocator' is replaceable, its allocation methods will be replaced with malloc() and free().
-    template<typename Allocator>
-    struct is_replaceable_allocator : std::false_type {};
-
-    template<typename T>
-    struct is_replaceable_allocator<std::allocator<T>> : std::true_type {};
-
-    template<typename Allocator>
-    inline constexpr bool is_replaceable_allocator_v = is_replaceable_allocator<Allocator>::value;
-
-
     // The type 'T' is considered trivially relocatable if its move construction and move assignment
     // can be replaced with memcpy()/memmove().
     template<typename T>
@@ -81,23 +70,13 @@ namespace detail
     template<typename T, typename A>
     constexpr alloc_pointer_t<A> allocate(A& allocator, alloc_size_t<A> count)
     {
-        if constexpr (is_replaceable_allocator_v<A>)
-        {
-            auto p = (alloc_pointer_t<A>) std::malloc(sizeof(T) * count);
-            if (!p) throw std::bad_alloc{};
-            return p;
-        }
-        else { return std::allocator_traits<A>::allocate(allocator, count); }
+        return std::allocator_traits<A>::allocate(allocator, count);
     }
 
     template<typename A>
     constexpr void deallocate(A& allocator, alloc_pointer_t<A> data, alloc_size_t<A> count) noexcept
     {
-        if constexpr (is_replaceable_allocator_v<A>)
-        {
-            std::free(data);
-        }
-        else { std::allocator_traits<A>::deallocate(allocator, data, count); }
+        std::allocator_traits<A>::deallocate(allocator, data, count);
     }
 
     //--------------------------- CONSTRUCT / DESTROY ONE IN UNINITIALIZED MEMORY ---------------------------------------
@@ -426,16 +405,6 @@ public:
             else if (old_size > src_size) detail::destroy_range(alloc_, first_ + src_size, last_);
             last_ = first_ + src_size;
         }
-        else if (!is_small() && detail::is_trivially_relocatable_v<T> && detail::is_replaceable_allocator_v<A>)
-        {
-            pointer new_first = (pointer) std::realloc(first_, sizeof(T) * src_size);
-            if (!new_first) throw std::bad_alloc{};
-            scope_exit guard{ [&] { std::free(new_first); } };
-            detail::assign_range(new_first, new_first + old_size, src_first);
-            detail::construct_range(alloc_, new_first + old_size, new_first + src_size, src_first + old_size);
-            guard.release();
-            set_storage(new_first, src_size, src_size);
-        }
         else
         {
             pointer new_first = detail::allocate<T>(alloc_, src_size);
@@ -648,7 +617,7 @@ public:
     template<typename... Args>
     reference emplace_back(Args&&... args)
     {
-        assert(!( memcontains(args) || ... )); // disallowed so we can realloc()
+        assert(!( memcontains(args) || ... ));
 
         if (size() == capacity()) reallocate_n(next_capacity());
         detail::construct(alloc_, last_, std::forward<Args>(args)...);
@@ -759,22 +728,13 @@ private:
 
         const size_type old_size = size();
 
-        if (!is_small() && detail::is_trivially_relocatable_v<T> && detail::is_replaceable_allocator_v<A>)
-        {
-            pointer new_first = (pointer) std::realloc(first_, sizeof(T) * new_capacity);
-            if (!new_first) throw std::bad_alloc{};
-            set_storage(new_first, old_size, new_capacity);
-        }
-        else
-        {
-            pointer new_first = detail::allocate<T>(alloc_, new_capacity);
-            scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_capacity); } };
-            detail::relocate_range_strong(alloc_, first_, last_, new_first);
-            detail::destroy_range(alloc_, first_, last_);
-            deallocate();
-            guard.release();
-            set_storage(new_first, old_size, new_capacity);
-        }
+        pointer new_first = detail::allocate<T>(alloc_, new_capacity);
+        scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_capacity); } };
+        detail::relocate_range_strong(alloc_, first_, last_, new_first);
+        detail::destroy_range(alloc_, first_, last_);
+        guard.release();
+        deallocate();
+        set_storage(new_first, old_size, new_capacity);
     }
 
     void deallocate() noexcept

@@ -546,7 +546,7 @@ public:
     size_type capacity() const noexcept { return size_type(last_alloc_ - first_); }
     size_type max_size() const noexcept { return std::allocator_traits<A>::max_size(alloc_); }
 
-    void reserve(size_type new_capacity) { reallocate_n(new_capacity); }
+    void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(new_capacity); }
     void shrink_to_fit() {}
 
     //-----------------------------------//
@@ -620,8 +620,8 @@ public:
         assert(!( memcontains(args) || ... ));
 
         if (size() == capacity()) reallocate_n(next_capacity());
-        detail::construct(alloc_, last_, std::forward<Args>(args)...);
-        return *last_++;
+        detail::construct(alloc_, last_++, std::forward<Args>(args)...);
+        return back();
     }
 
     void pop_back() noexcept { assert(!empty()); detail::destroy(alloc_, last_--); }
@@ -724,8 +724,6 @@ private:
 
     void reallocate_n(size_type new_capacity)
     {
-        if (new_capacity <= capacity()) return;
-
         const size_type old_size = size();
 
         pointer new_first = detail::allocate<T>(alloc_, new_capacity);
@@ -752,7 +750,7 @@ private:
         }
         else if (count > size())
         {
-            reallocate_n(count);
+            if (count > capacity()) reallocate_n(count);
             detail::construct_range(alloc_, last_, first_ + count, std::forward<Args>(args)...);
             last_ = first_ + count;
         }
@@ -777,7 +775,7 @@ private:
 
     size_type next_capacity() const noexcept
     {
-        return std::max( capacity() + 1, size_type(growth_factor_ * capacity()) );
+        return size_type(growth_factor_ * capacity()) + 1;
     }
 
     constexpr bool memcontains(const T& elem) const noexcept

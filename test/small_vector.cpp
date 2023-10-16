@@ -645,9 +645,9 @@ struct DummyAllocator
         return static_cast<T*>(storage);
     }
 
-    void deallocate(T* storage, std::size_t size) const noexcept
+    void deallocate(T* storage, std::size_t) const noexcept
     {
-        ::operator delete[](storage, size * sizeof(value_type));
+        ::operator delete[](storage);
     }
 
     using propagate_on_container_copy_assignment = std::true_type;

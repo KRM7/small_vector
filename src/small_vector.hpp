@@ -10,7 +10,6 @@
 #include <type_traits>
 #include <utility>
 #include <stdexcept>
-#include <cmath>
 #include <cstring>
 #include <cstdlib>
 #include <cstddef>
@@ -225,7 +224,7 @@ namespace detail
     constexpr void assign_range(T* first, T* last, Iter src_first)
     noexcept(std::is_nothrow_assignable_v<T&, decltype(*src_first)>)
     {
-        (void) std::copy(src_first, src_first + std::distance(first, last), first);
+        std::copy(src_first, src_first + std::distance(first, last), first);
     }
 
 
@@ -531,12 +530,14 @@ public:
     //              CAPACITY             //
     //-----------------------------------//
 
-    bool is_small() const noexcept { return first_ == buffer_.begin(); }
     bool empty() const noexcept { return first_ == last_; }
 
     size_type size() const noexcept { return size_type(last_ - first_); }
     size_type capacity() const noexcept { return size_type(last_alloc_ - first_); }
     size_type max_size() const noexcept { return std::allocator_traits<A>::max_size(alloc_); }
+    
+    bool is_small() const noexcept { return first_ == buffer_.begin(); }
+    size_type small_capacity() const noexcept { return Size; }
 
     void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(new_capacity); }
     void shrink_to_fit() {}
@@ -610,7 +611,7 @@ public:
     reference emplace_back(Args&&... args)
     {
         if (size() == capacity())
-	    reallocate_append(next_capacity(), std::forward<Args>(args)...);
+            reallocate_append(next_capacity(), std::forward<Args>(args)...);
         else
             detail::construct(alloc_, last_++, std::forward<Args>(args)...);	
         return back();

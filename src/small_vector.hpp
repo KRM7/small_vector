@@ -107,11 +107,7 @@ namespace detail
     constexpr void construct(A& allocator, T* at, const std::type_identity_t<T>& from)
     noexcept(std::is_nothrow_copy_constructible_v<T> && has_trivial_construct_v<A, T, const T&>)
     {
-        if constexpr (std::is_trivially_copy_constructible_v<T> && has_trivial_construct_v<A, T, const T&>)
-        {
-            std::memcpy(at, std::addressof(from), sizeof(T));
-        }
-        else { std::allocator_traits<A>::construct(allocator, at, from); }
+        std::allocator_traits<A>::construct(allocator, at, from);
     }
 
     // move construct
@@ -119,11 +115,7 @@ namespace detail
     constexpr void construct(A& allocator, T* at, std::type_identity_t<T>&& from)
     noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
     {
-        if constexpr (std::is_trivially_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
-        {
-            std::memcpy(at, std::addressof(from), sizeof(T));
-        }
-        else { std::allocator_traits<A>::construct(allocator, at, std::move(from)); }
+        std::allocator_traits<A>::construct(allocator, at, std::move(from));
     }
 
     // construct from args
@@ -617,10 +609,10 @@ public:
     template<typename... Args>
     reference emplace_back(Args&&... args)
     {
-        assert(!( memcontains(args) || ... ));
-
-        if (size() == capacity()) reallocate_n(next_capacity());
-        detail::construct(alloc_, last_++, std::forward<Args>(args)...);
+        if (size() == capacity())
+	    reallocate_append(next_capacity(), std::forward<Args>(args)...);
+        else
+            detail::construct(alloc_, last_++, std::forward<Args>(args)...);	
         return back();
     }
 
@@ -637,15 +629,15 @@ public:
     template<typename... Args>
     iterator emplace(const_iterator pos, Args&&... args)
     {
-        assert(!( memcontains(args) || ... ));
-
         if (pos == cend()) return std::addressof(emplace_back(std::forward<Args>(args)...));
 
+        T new_elem{ std::forward<Args>(args)... };
         const auto offset = std::distance(cbegin(), pos);
+
         if (size() == capacity()) reallocate_n(next_capacity());
         detail::construct(alloc_, last_, std::move(back()));
         std::shift_right(first_ + offset, last_++, 1);
-        *(first_ + offset) = T{ std::forward<Args>(args)... }; // ignore allocator
+        *(first_ + offset) = std::move(new_elem);
         return first_ + offset;
     }
 
@@ -724,6 +716,8 @@ private:
 
     void reallocate_n(size_type new_capacity)
     {
+        assert(new_capacity > capacity());
+
         const size_type old_size = size();
 
         pointer new_first = detail::allocate<T>(alloc_, new_capacity);
@@ -733,6 +727,24 @@ private:
         guard.release();
         deallocate();
         set_storage(new_first, old_size, new_capacity);
+    }
+
+    template<typename... Args>
+    void reallocate_append(size_type new_capacity, Args&&... args)
+    {
+        assert(new_capacity > capacity());
+
+        const size_type old_size = size();
+
+        pointer new_first = detail::allocate<T>(alloc_, new_capacity);
+        scope_exit guard1{ [&] { detail::deallocate(alloc_, new_first, new_capacity); } };
+        detail::construct(alloc_, new_first + old_size, std::forward<Args>(args)...);
+        scope_exit guard2{ [&] { detail::destroy(alloc_, new_first + old_size); } };
+        detail::relocate_range_strong(alloc_, first_, last_, new_first);
+        { guard1.release(); guard2.release(); }
+        detail::destroy_range(alloc_, first_, last_);
+        deallocate();
+        set_storage(new_first, old_size + 1, new_capacity); 
     }
 
     void deallocate() noexcept
@@ -776,11 +788,6 @@ private:
     size_type next_capacity() const noexcept
     {
         return size_type(growth_factor_ * capacity()) + 1;
-    }
-
-    constexpr bool memcontains(const T& elem) const noexcept
-    {
-        return (first_ <= std::addressof(elem) && std::addressof(elem) < last_);
     }
 
 }; // class small_vector

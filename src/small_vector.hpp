@@ -103,7 +103,7 @@ namespace detail
         else { std::allocator_traits<A>::construct(allocator, at); }
     }
 
-    // copy consruct
+    // copy construct
     template<typename T, typename A>
     constexpr void construct(A& allocator, T* at, const std::type_identity_t<T>& from)
     noexcept(std::is_nothrow_copy_constructible_v<T> && has_trivial_construct_v<A, T, const T&>)
@@ -229,26 +229,25 @@ namespace detail
         std::copy(src_first, src_first + std::distance(first, last), first);
     }
 
-
     //--------------------------------------- SMALL VECTOR BUFFER -------------------------------------------------------
 
     inline constexpr std::size_t cache_line_size = 64;
 
-    template<typename T, size_t Size, size_t Align = cache_line_size>
+    template<typename T, std::size_t Size, std::size_t Align = cache_line_size>
     struct small_vector_buffer
     {
     public:
-        auto begin() noexcept { return reinterpret_cast<T*>(&data_); }
-        auto begin() const noexcept { return reinterpret_cast<const T*>(&data_); }
+        auto begin() noexcept { return std::launder(reinterpret_cast<T*>(std::addressof(data_[0]))); }
+        auto begin() const noexcept { return std::launder(reinterpret_cast<const T*>(std::addressof(data_[0]))); }
 
-        auto end() noexcept { return reinterpret_cast<T*>(&data_) + Size; }
-        auto end() const noexcept { return reinterpret_cast<const T*>(&data_) + Size; }
+        auto end() noexcept { return reinterpret_cast<T*>(std::addressof(data_[0])) + Size; }
+        auto end() const noexcept { return reinterpret_cast<const T*>(std::addressof(data_[0])) + Size; }
 
-        constexpr size_t size() const noexcept { return Size; }
+        constexpr std::size_t size() const noexcept { return Size; }
 
     private:
-        inline constexpr static size_t align_req = (alignof(T) > Align) ? alignof(T) : Align;
-        inline constexpr static size_t buffer_size = sizeof(T) * Size;
+        inline constexpr static std::size_t align_req = (alignof(T) > Align) ? alignof(T) : Align;
+        inline constexpr static std::size_t buffer_size = sizeof(T) * Size;
 
         using storage_type = unsigned char[buffer_size];
 
@@ -260,20 +259,20 @@ namespace detail
     struct default_small_size
     {
     private:
-        inline constexpr static size_t overall_size = cache_line_size;
-        inline constexpr static size_t buffer_size = overall_size - 3 * sizeof(T*);
-        inline constexpr static size_t buffer_min_count = 4;
+        inline constexpr static std::size_t overall_size = cache_line_size;
+        inline constexpr static std::size_t buffer_size = overall_size - 3 * sizeof(T*);
+        inline constexpr static std::size_t buffer_min_count = 4;
     public:
-        inline constexpr static size_t value = std::max(buffer_min_count, buffer_size / sizeof(T));
+        inline constexpr static std::size_t value = std::max(buffer_min_count, buffer_size / sizeof(T));
     };
 
     template<typename T>
-    inline constexpr size_t default_small_size_v = default_small_size<T>::value;
+    inline constexpr std::size_t default_small_size_v = default_small_size<T>::value;
 
 } // namespace detail
 
 
-template<typename T, size_t Size = detail::default_small_size_v<T>, typename A = std::allocator<T>>
+template<typename T, std::size_t Size = detail::default_small_size_v<T>, typename A = std::allocator<T>>
 class small_vector
 {
 public:

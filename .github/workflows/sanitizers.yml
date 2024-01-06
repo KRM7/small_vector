@@ -32,17 +32,15 @@ jobs:
       run: sudo apt update && sudo apt install -y ${{ matrix.pkgs }}
 
     - name: setup-dependencies
-      env:
-        CXX: ${{ matrix.cxx }}
-      run: sudo bash ./install_catch.sh && sudo bash ./install_benchmark.sh
+      run: |
+          sudo bash ./install_catch.sh -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          sudo bash ./install_benchmark.sh -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
 
     - name: setup-build
-      env:
-        CXX: ${{ matrix.cxx }}
-      run: cmake .. -DSMALL_VECTOR_FLAGS="-fsanitize=${{ matrix.sanitizer }} -g -fno-omit-frame-pointer"
+      run: sudo cmake .. -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.sanitizer }} -g -fno-omit-frame-pointer"
 
     - name: build
-      run: cmake --build .
+      run: sudo cmake --build .
     
     - name: run-tests
-      run: ctest --output-on-failure --schedule-random
+      run: sudo ctest --output-on-failure --schedule-random

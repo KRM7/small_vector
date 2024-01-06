@@ -10,9 +10,9 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "^(Debug|Release|RelWithDebInfo)$")
 endif()
 
 if(MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SMALL_VECTOR_FLAGS} -permissive- -W4 -WX -diagnostics:caret")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -permissive- -W4 -WX -diagnostics:caret")
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SMALL_VECTOR_FLAGS} -Wall -Wextra -Wpedantic -Werror -pedantic-errors -g")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Werror -pedantic-errors -g")
 endif()
 
 if(CMAKE_BUILD_TYPE MATCHES "(Release|RelWithDebInfo)")

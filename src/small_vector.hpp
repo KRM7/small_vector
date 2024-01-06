@@ -1,3 +1,5 @@
+/* Copyright (c) 2024 Krisztián Rugási. Subject to the MIT License. */
+
 #ifndef SMALL_VECTOR_SMALL_VECTOR_HPP
 #define SMALL_VECTOR_SMALL_VECTOR_HPP
 

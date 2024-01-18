@@ -538,7 +538,7 @@ public:
     size_type max_size() const noexcept { return std::allocator_traits<A>::max_size(alloc_); }
     
     bool is_small() const noexcept { return first_ == buffer_.begin(); }
-    size_type small_capacity() const noexcept { return Size; }
+    static constexpr size_type small_capacity() noexcept { return Size; }
 
     void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(new_capacity); }
     void shrink_to_fit() {}

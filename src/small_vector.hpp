@@ -85,7 +85,7 @@ namespace detail
     template<typename T, typename A>
     constexpr void destroy(A& allocator, T* at) noexcept
     {
-        if constexpr (!std::is_trivially_destructible_v<T> || !has_trivial_destroy_v<A, T>)
+        if constexpr (!std::is_trivially_destructible_v<T> || !has_trivial_destroy_v<A&, T>)
         {
             std::allocator_traits<A>::destroy(allocator, at);
         }
@@ -94,9 +94,9 @@ namespace detail
     // default construct
     template<typename T, typename A>
     constexpr void construct(A& allocator, T* at)
-    noexcept(std::is_nothrow_default_constructible_v<T> && has_trivial_construct_v<A, T>)
+    noexcept(std::is_nothrow_default_constructible_v<T> && has_trivial_construct_v<A&, T>)
     {
-        if constexpr (std::is_trivially_default_constructible_v<T> && has_trivial_construct_v<A, T>)
+        if constexpr (std::is_trivially_default_constructible_v<T> && has_trivial_construct_v<A&, T>)
         {
             std::memset(at, 0, sizeof(T));
         }
@@ -106,7 +106,7 @@ namespace detail
     // copy construct
     template<typename T, typename A>
     constexpr void construct(A& allocator, T* at, const std::type_identity_t<T>& from)
-    noexcept(std::is_nothrow_copy_constructible_v<T> && has_trivial_construct_v<A, T, const T&>)
+    noexcept(std::is_nothrow_copy_constructible_v<T> && has_trivial_construct_v<A&, T, const T&>)
     {
         std::allocator_traits<A>::construct(allocator, at, from);
     }
@@ -114,7 +114,7 @@ namespace detail
     // move construct
     template<typename T, typename A>
     constexpr void construct(A& allocator, T* at, std::type_identity_t<T>&& from)
-    noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
+    noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A&, T, T&&>)
     {
         std::allocator_traits<A>::construct(allocator, at, std::move(from));
     }
@@ -122,7 +122,7 @@ namespace detail
     // construct from args
     template<typename T, typename A, typename... Args>
     constexpr void construct(A& allocator, T* at, Args&&... args)
-    noexcept(std::is_nothrow_constructible_v<T, Args...> && has_trivial_construct_v<A, Args...>)
+    noexcept(std::is_nothrow_constructible_v<T, Args...> && has_trivial_construct_v<A&, Args...>)
     {
         std::allocator_traits<A>::construct(allocator, at, std::forward<Args>(args)...);
     }
@@ -138,9 +138,9 @@ namespace detail
     // default construct
     template<typename T, typename A>
     constexpr void construct_range(A& allocator, T* first, T* last)
-    noexcept(std::is_nothrow_default_constructible_v<T> && has_trivial_construct_v<A, T>)
+    noexcept(std::is_nothrow_default_constructible_v<T> && has_trivial_construct_v<A&, T>)
     {
-        if constexpr (std::is_trivially_default_constructible_v<T> && has_trivial_construct_v<A, T>)
+        if constexpr (std::is_trivially_default_constructible_v<T> && has_trivial_construct_v<A&, T>)
         {
             std::memset(first, 0, sizeof(T) * (last - first));
         }
@@ -171,7 +171,7 @@ namespace detail
     {
         using R = std::iter_reference_t<Iter>;
 
-        if constexpr (std::contiguous_iterator<Iter> && std::is_trivially_constructible_v<T, R> && has_trivial_construct_v<A, T, R>)
+        if constexpr (std::contiguous_iterator<Iter> && std::is_trivially_constructible_v<T, R> && has_trivial_construct_v<A&, T, R>)
         {
             std::memcpy(first, std::addressof(*src_first), sizeof(T) * (last - first));
         }
@@ -187,9 +187,9 @@ namespace detail
     // move construct from another range if noexcept
     template<typename T, typename A>
     constexpr void relocate_range_strong(A& allocator, T* first, T* last, T* dest)
-    noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
+    noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A&, T, T&&>)
     {
-        if constexpr (is_trivially_relocatable_v<T> && has_trivial_construct_v<A, T, T&&>)
+        if constexpr (is_trivially_relocatable_v<T> && has_trivial_construct_v<A&, T, T&&>)
         {
             std::memcpy(dest, first, sizeof(T) * (last - first));
         }
@@ -205,9 +205,9 @@ namespace detail
     // move construct from another range
     template<typename T, typename A>
     constexpr void relocate_range_weak(A& allocator, T* first, T* last, T* dest)
-    noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A, T, T&&>)
+    noexcept(std::is_nothrow_move_constructible_v<T> && has_trivial_construct_v<A&, T, T&&>)
     {
-        if constexpr (is_trivially_relocatable_v<T> && has_trivial_construct_v<A, T, T&&>)
+        if constexpr (is_trivially_relocatable_v<T> && has_trivial_construct_v<A&, T, T&&>)
         {
             std::memcpy(dest, first, sizeof(T) * (last - first));
         }
@@ -350,7 +350,7 @@ public:
         small_vector(other.begin(), other.end(), allocator)
     {}
 
-    small_vector(small_vector&& other) noexcept(std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A, T, T&&>) :
+    small_vector(small_vector&& other) noexcept(std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A&, T, T&&>) :
         alloc_(std::move(other.alloc_))
     {
         if (other.is_small())
@@ -560,7 +560,7 @@ public:
     }
 
     void swap(small_vector& other)
-    noexcept(std::is_nothrow_swappable_v<T> && std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A, T, T&&>)
+    noexcept(std::is_nothrow_swappable_v<T> && std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A&, T, T&&>)
     {
         if (std::addressof(other) == this) [[unlikely]] return;
 
@@ -794,7 +794,7 @@ private:
 }; // class small_vector
 
 template<std::forward_iterator Iter, std::size_t Size = detail::default_small_size_v<std::iter_value_t<Iter>>, typename Alloc = std::allocator<std::iter_value_t<Iter>>>
-small_vector(Iter, Iter, Alloc = {}) -> small_vector<std::iter_value_t<Iter>, Size, Alloc>;
+small_vector(Iter, Iter, Alloc = Alloc()) -> small_vector<std::iter_value_t<Iter>, Size, Alloc>;
 
 template<typename T, std::size_t Size, typename A>
 void swap(small_vector<T, Size, A>& lhs, small_vector<T, Size, A>& rhs)

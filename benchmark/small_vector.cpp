@@ -9,7 +9,7 @@ inline constexpr size_t LARGE_SIZE = 100;
 /* ----------------------------------------------------------------------------------------------------------- */
 
 template<typename V>
-void benchmark_ctor_size(benchmark::State& state)
+void benchmark_construct_from_size(benchmark::State& state)
 {
     const size_t size = state.range(0);
 
@@ -17,16 +17,17 @@ void benchmark_ctor_size(benchmark::State& state)
     {
         V vec(size);
         benchmark::DoNotOptimize(vec);
+        benchmark::ClobberMemory();
     }
 }
 
-BENCHMARK(benchmark_ctor_size<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_ctor_size<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_construct_from_size<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_construct_from_size<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
 
 /* ----------------------------------------------------------------------------------------------------------- */
 
 template<typename V>
-void benchmark_ctor_size_value(benchmark::State& state)
+void benchmark_construct_from_size_value(benchmark::State& state)
 {
     const size_t size = state.range(0);
 
@@ -34,119 +35,55 @@ void benchmark_ctor_size_value(benchmark::State& state)
     {
         V vec(size, 2);
         benchmark::DoNotOptimize(vec);
+        benchmark::ClobberMemory();
     }
 }
 
-BENCHMARK(benchmark_ctor_size_value<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_ctor_size_value<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_construct_from_size_value<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_construct_from_size_value<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
 
 /* ----------------------------------------------------------------------------------------------------------- */
 
 template<typename V>
-void benchmark_ctor_range(benchmark::State& state)
+void benchmark_construct_from_range(benchmark::State& state)
 {
-    const size_t size = state.range(0);
-    const V src(size, 0);
+    const V src(state.range(0), 0);
 
     for (auto _ : state)
     {
         V vec(src.begin(), src.end());
         benchmark::DoNotOptimize(vec);
+        benchmark::ClobberMemory();
     }
 }
 
-BENCHMARK(benchmark_ctor_range<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_ctor_range<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_construct_from_range<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_construct_from_range<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
 
 /* ----------------------------------------------------------------------------------------------------------- */
 
 template<typename V>
-void benchmark_push_back(benchmark::State& state)
-{
-    size_t size = state.range(0);
-
-    for (auto _ : state)
-    {
-        V vec;
-        for (size_t i = 0; i < size; i++) { vec.push_back(int(i)); }
-        benchmark::DoNotOptimize(vec);
-    }
-}
-
-BENCHMARK(benchmark_push_back<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_push_back<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-
-/* ----------------------------------------------------------------------------------------------------------- */
-
-template<typename V>
-void benchmark_reserve_push_back(benchmark::State& state)
-{
-    size_t size = state.range(0);
-    V vec(size);
-
-    for (auto _ : state)
-    {
-        vec.resize(0);
-        for (size_t i = 0; i < size; i++) { vec.push_back(int(i)); }
-        benchmark::DoNotOptimize(vec);
-    }
-}
-
-BENCHMARK(benchmark_reserve_push_back<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_reserve_push_back<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-
-/* ----------------------------------------------------------------------------------------------------------- */
-
-template<typename V>
-void benchmark_index_operator(benchmark::State& state)
+void benchmark_assign_reserved(benchmark::State& state)
 {
     const size_t size = state.range(0);
-    V vec(size, 0);
 
-    for (auto _ : state) { benchmark::DoNotOptimize(vec[2]); }
-}
-
-BENCHMARK(benchmark_index_operator<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_index_operator<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-
-/* ----------------------------------------------------------------------------------------------------------- */
-
-template<typename V>
-void benchmark_iteration(benchmark::State& state)
-{
-    const size_t size = state.range(0);
-    V vec(size, 0);
+    V src(size, 1);
+    V dst(size, 2);
 
     for (auto _ : state)
     {
-        for (auto& elem : vec) { benchmark::DoNotOptimize(elem); }
+        dst.resize(0);
+        benchmark::DoNotOptimize(dst);
+
+        dst.assign(src.begin(), src.end());
+        benchmark::DoNotOptimize(dst);
+
+        benchmark::ClobberMemory();
     }
 }
 
-BENCHMARK(benchmark_iteration<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_iteration<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-
-/* ----------------------------------------------------------------------------------------------------------- */
-
-template<typename V>
-void benchmark_assign(benchmark::State& state)
-{
-    const size_t size = state.range(0);
-    const V src(size, 1);
-    V dest(size, 2);
-
-    for (auto _ : state)
-    {
-        dest.resize(0);
-        benchmark::DoNotOptimize(dest);
-
-        dest.assign(src.begin(), src.end());
-        benchmark::DoNotOptimize(dest);
-    }
-}
-
-BENCHMARK(benchmark_assign<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_assign<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_assign_reserved<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_assign_reserved<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
 
 /* ----------------------------------------------------------------------------------------------------------- */
 
@@ -164,6 +101,7 @@ void benchmark_swap(benchmark::State& state)
         swap(left, right);
         benchmark::DoNotOptimize(left);
         benchmark::DoNotOptimize(right);
+        benchmark::ClobberMemory();
     }
 }
 
@@ -173,24 +111,170 @@ BENCHMARK(benchmark_swap<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->
 /* ----------------------------------------------------------------------------------------------------------- */
 
 template<typename V>
-void benchmark_insert(benchmark::State& state)
+void benchmark_resize(benchmark::State& state)
 {
     const size_t size = state.range(0);
-    V vec(size, 1);
-    vec.reserve(size + 1);
+
+    V vec(size);
 
     for (auto _ : state)
-    {     
-        vec.insert(vec.begin(), 1);
+    {
+        vec.resize(size - 1);
         benchmark::DoNotOptimize(vec);
 
         vec.resize(size);
         benchmark::DoNotOptimize(vec);
+
+        benchmark::ClobberMemory();
     }
 }
 
-BENCHMARK(benchmark_insert<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
-BENCHMARK(benchmark_insert<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_resize<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_resize<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+
+/* ----------------------------------------------------------------------------------------------------------- */
+
+template<typename V>
+void benchmark_push_back_reserved(benchmark::State& state)
+{
+    const size_t size = state.range(0);
+
+    V vec(size + 1);
+
+    for (auto _ : state)
+    {
+        vec.resize(size);
+        benchmark::DoNotOptimize(vec);
+
+        vec.push_back(3);
+        benchmark::DoNotOptimize(vec);
+
+        benchmark::ClobberMemory();
+    }
+}
+
+BENCHMARK(benchmark_push_back_reserved<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_push_back_reserved<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+
+/* ----------------------------------------------------------------------------------------------------------- */
+
+template<typename V>
+void benchmark_push_back_reallocate(benchmark::State& state)
+{
+    const size_t final_size = state.range(0);
+    const size_t start_size = small_vector<int>::small_capacity();
+
+    for (auto _ : state)
+    {
+        V vec(start_size);
+
+        for (size_t i = 0; i < final_size; i++)
+        {
+            benchmark::DoNotOptimize(vec);
+            vec.push_back(static_cast<int>(i));
+            benchmark::ClobberMemory();
+        }
+    }
+}
+
+BENCHMARK(benchmark_push_back_reallocate<std::vector<int>>)->ArgName("size")->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_push_back_reallocate<small_vector<int>>)->ArgName("size")->Arg(LARGE_SIZE);
+
+/* ----------------------------------------------------------------------------------------------------------- */
+
+template<typename V>
+void benchmark_insert_one_reserved(benchmark::State& state)
+{
+    const size_t size = state.range(0);
+
+    V vec(size + 1, 1);
+
+    for (auto _ : state)
+    {
+        vec.resize(size);
+        benchmark::DoNotOptimize(vec);
+
+        vec.insert(vec.begin(), 3);
+        benchmark::DoNotOptimize(vec);
+
+        benchmark::ClobberMemory();
+    }
+}
+
+BENCHMARK(benchmark_insert_one_reserved<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_insert_one_reserved<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+
+/* ----------------------------------------------------------------------------------------------------------- */
+
+template<typename V>
+void benchmark_insert_one_reallocate(benchmark::State& state)
+{
+    const size_t final_size = state.range(0);
+    const size_t start_size = small_vector<int>::small_capacity();
+
+    for (auto _ : state)
+    {
+        V vec(start_size);
+
+        for (size_t i = 0; i < final_size; i++)
+        {
+            benchmark::DoNotOptimize(vec);
+            vec.insert(vec.begin(), static_cast<int>(i));
+            benchmark::ClobberMemory();
+        }
+    }
+}
+
+BENCHMARK(benchmark_insert_one_reallocate<std::vector<int>>)->ArgName("size")->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_insert_one_reallocate<small_vector<int>>)->ArgName("size")->Arg(LARGE_SIZE);
+
+/* ----------------------------------------------------------------------------------------------------------- */
+
+template<typename V>
+void benchmark_insert_range_reserved(benchmark::State& state)
+{
+    const size_t size = state.range(0);
+
+    V vec(size + 3, 1);
+
+    for (auto _ : state)
+    {
+        vec.resize(size);
+        benchmark::DoNotOptimize(vec);
+
+        vec.insert(vec.begin(), { 1, 2, 3 });
+        benchmark::DoNotOptimize(vec);
+
+        benchmark::ClobberMemory();
+    }
+}
+
+BENCHMARK(benchmark_insert_range_reserved<std::vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_insert_range_reserved<small_vector<int>>)->ArgName("size")->Arg(SMALL_SIZE)->Arg(LARGE_SIZE);
+
+/* ----------------------------------------------------------------------------------------------------------- */
+
+template<typename V>
+void benchmark_insert_range_reallocate(benchmark::State& state)
+{
+    const size_t final_size = state.range(0);
+    const size_t start_size = small_vector<int>::small_capacity();
+
+    for (auto _ : state)
+    {
+        V vec(start_size);
+
+        while (vec.size() < final_size)
+        {
+            benchmark::DoNotOptimize(vec);
+            vec.insert(vec.begin(), { 1, 2, 3 });
+            benchmark::ClobberMemory();
+        }
+    }
+}
+
+BENCHMARK(benchmark_insert_range_reallocate<std::vector<int>>)->ArgName("size")->Arg(LARGE_SIZE);
+BENCHMARK(benchmark_insert_range_reallocate<small_vector<int>>)->ArgName("size")->Arg(LARGE_SIZE);
 
 /* ----------------------------------------------------------------------------------------------------------- */
 
@@ -198,6 +282,7 @@ template<typename V>
 void benchmark_erase(benchmark::State& state)
 {
     const size_t size = state.range(0);
+
     V vec(size, 1);
 
     for (auto _ : state)

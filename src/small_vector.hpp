@@ -246,6 +246,33 @@ namespace detail
         std::copy(src_first, src_first + std::distance(first, last), first);
     }
 
+    //------------------------------------ ALLOCATOR MANGAGED OBJECT ----------------------------------------------------
+
+    template<typename T, typename Allocator>
+    class allocator_managed
+    {
+    public:
+        template<typename... Args>
+        allocator_managed(Allocator& alloc, Args&&... args) :
+            alloc_(alloc)
+        {
+            detail::construct(alloc_, std::addressof(**this), std::forward<Args>(args)...);
+        }
+
+        ~allocator_managed() noexcept
+        {
+            detail::destroy(alloc_, std::addressof(**this));
+        }
+
+        T& operator*() noexcept { return *std::launder(reinterpret_cast<T*>(std::addressof(data_[0]))); }
+
+    private:
+        using storage_type = unsigned char[sizeof(T)];
+
+        alignas(T) storage_type data_;
+        Allocator& alloc_;
+    };
+
     //--------------------------------------- SMALL VECTOR BUFFER -------------------------------------------------------
 
     inline constexpr std::size_t cache_line_size = 64;
@@ -671,13 +698,14 @@ public:
     {
         if (pos == cend()) return std::addressof(emplace_back(std::forward<Args>(args)...));
 
-        T new_elem{ std::forward<Args>(args)... };
+        detail::allocator_managed<T, A> new_elem(alloc_, std::forward<Args>(args)...);
+
         const auto offset = std::distance(cbegin(), pos);
 
         if (size() == capacity()) reallocate_n(next_capacity());
         detail::construct(alloc_, last_, std::move(back()));
         std::shift_right(first_ + offset, last_++, 1);
-        *(first_ + offset) = std::move(new_elem);
+        *(first_ + offset) = std::move(*new_elem);
         return first_ + offset;
     }
 

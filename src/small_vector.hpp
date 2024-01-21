@@ -448,6 +448,9 @@ public:
     }
 
     small_vector& operator=(small_vector&& other)
+    noexcept(std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A&, T, T&&> &&
+             std::is_nothrow_move_assignable_v<T> &&
+             detail::steal_pointers_v<A>)
     {
         if (std::addressof(other) == this) [[unlikely]] return *this;
 

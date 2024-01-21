@@ -1,10 +1,16 @@
+/* Copyright (c) 2024 Krisztián Rugási. Subject to the MIT License. */
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <small_vector.hpp>
+#include <algorithm>
 #include <vector>
+#include <iterator>
 #include <memory>
 #include <type_traits>
+#include <string>
+#include <sstream>
 #include <utility>
 #include <cstddef>
 
@@ -15,31 +21,35 @@ using TrivialType = int;
 
 struct NonDefaultConstructibleType
 {
-    NonDefaultConstructibleType(int) {}
+    NonDefaultConstructibleType(int i) : i_(i) {}
 
     friend bool operator==(const NonDefaultConstructibleType&, const NonDefaultConstructibleType&) = default;
+
+    int i_ = 0;
 };
 
 struct MoveOnlyType
 {
     MoveOnlyType() = default;
-    MoveOnlyType(int) {}
+    MoveOnlyType(int i) : i_(i) {}
 
     MoveOnlyType(const MoveOnlyType&) = delete;
-    MoveOnlyType(MoveOnlyType&&) {}
+    MoveOnlyType(MoveOnlyType&& o) : i_(o.i_) {}
 
     MoveOnlyType& operator=(const MoveOnlyType&) = delete;
-    MoveOnlyType& operator=(MoveOnlyType&&) { return *this; }
+    MoveOnlyType& operator=(MoveOnlyType&& o) { i_ = o.i_; return *this; }
 
     ~MoveOnlyType() noexcept {}
 
     friend bool operator==(const MoveOnlyType&, const MoveOnlyType&) = default;
+
+    int i_ = 0;
 };
 
 struct ImmovableType
 {
     ImmovableType() = default;
-    ImmovableType(int) {}
+    ImmovableType(int i) : i_(i) {}
 
     ImmovableType(const ImmovableType&) = delete;
     ImmovableType(ImmovableType&&)      = delete;
@@ -48,20 +58,30 @@ struct ImmovableType
     ImmovableType& operator=(ImmovableType&&)       = delete;
 
     friend bool operator==(const ImmovableType&, const ImmovableType&) = default;
+
+    int i_ = 0;
 };
 
 struct NonTrivialType
 {
     NonTrivialType() {}
-    NonTrivialType(int) {}
-    NonTrivialType(const NonTrivialType&) {}
-    NonTrivialType(NonTrivialType&&) {}
-    NonTrivialType& operator=(const NonTrivialType&) { return *this; }
-    NonTrivialType& operator=(NonTrivialType&&) { return *this; }
+    NonTrivialType(int i) : i_(i) {}
+    NonTrivialType(const NonTrivialType& o) : i_(o.i_) {}
+    NonTrivialType(NonTrivialType&& o) : i_(o.i_) {}
+    NonTrivialType& operator=(const NonTrivialType& o) { i_ = o.i_; return *this; }
+    NonTrivialType& operator=(NonTrivialType&& o) { i_ = o.i_; return *this; }
     ~NonTrivialType() noexcept {}
 
     friend bool operator==(const NonTrivialType&, const NonTrivialType&) = default;
+
+    int i_ = 0;
 };
+
+template<typename T>
+constexpr auto equal_to(T rhs)
+{
+    return [rhs = std::move(rhs)](const auto& lhs) { return lhs == rhs; };
+}
 
 
     //-----------------------------------//
@@ -74,6 +94,9 @@ TEMPLATE_TEST_CASE("small_vector()", "[constructor]", TrivialType, MoveOnlyType,
     small_vector<TestType> vec;
 
     REQUIRE(vec.empty());
+    REQUIRE(vec.begin() == vec.end());
+    REQUIRE(vec.cbegin() == vec.end());
+
     REQUIRE(vec.size() == 0);
     REQUIRE(vec.capacity() > 0);
 }
@@ -83,6 +106,9 @@ TEMPLATE_TEST_CASE("small_vector(Alloc)", "[constructor]", TrivialType, MoveOnly
     small_vector<TestType> vec(std::allocator<TestType>{});
 
     REQUIRE(vec.empty());
+    REQUIRE(vec.begin() == vec.end());
+    REQUIRE(vec.cbegin() == vec.end());
+
     REQUIRE(vec.size() == 0);
     REQUIRE(vec.capacity() > 0);
 }
@@ -105,6 +131,9 @@ TEMPLATE_TEST_CASE("small_vector(size_t, Alloc)", "[constructor]", TrivialType, 
     small_vector<TestType> vec(size, std::allocator<TestType>{});
 
     REQUIRE(!vec.empty());
+    REQUIRE(vec.begin() != vec.end());
+    REQUIRE(vec.cbegin() != vec.end());
+
     REQUIRE(vec.size() == size);
     REQUIRE(vec.capacity() >= size);
 }
@@ -117,16 +146,18 @@ TEMPLATE_TEST_CASE("small_vector(size_t, const T&)", "[constructor]", TrivialTyp
 
     REQUIRE(vec.size() == size);
     REQUIRE(vec.capacity() >= size);
+    REQUIRE(std::all_of(vec.begin(), vec.end(), equal_to<TestType>(0)));
 }
 
 TEMPLATE_TEST_CASE("small_vector(size_t, const T&, Alloc)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
     const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
 
-    small_vector vec(size, TestType{ 0 }, std::allocator<TestType>{});
+    small_vector vec(size, TestType{ 1 }, std::allocator<TestType>{});
 
     REQUIRE(vec.size() == size);
     REQUIRE(vec.capacity() >= size);
+    REQUIRE(std::all_of(vec.begin(), vec.end(), equal_to<TestType>(1)));
 }
 
 TEMPLATE_TEST_CASE("small_vector(Iter, Iter)", "[constructor]", TrivialType, MoveOnlyType, ImmovableType, NonTrivialType, NonDefaultConstructibleType)
@@ -139,18 +170,35 @@ TEMPLATE_TEST_CASE("small_vector(Iter, Iter)", "[constructor]", TrivialType, Mov
 
     REQUIRE(vec.size() == source.size());
     REQUIRE(vec.capacity() >= source.size());
+    REQUIRE(vec.front() == 2);
+    REQUIRE(vec.back() == 2);
 }
 
-TEMPLATE_TEST_CASE("small_vector(Iter, Iter, Alloc)", "[constructor]", TrivialType, MoveOnlyType, ImmovableType, NonTrivialType, NonDefaultConstructibleType)
+TEMPLATE_TEST_CASE("small_vector(FwdIter, FwdIter, Alloc)", "[constructor]", TrivialType, MoveOnlyType, ImmovableType, NonTrivialType, NonDefaultConstructibleType)
 {
     const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
 
-    const std::vector<int> source(size, 2);
+    const std::vector<int> source(size, 3);
 
     small_vector<TestType> vec(source.begin(), source.end(), std::allocator<TestType>{});
 
     REQUIRE(vec.size() == source.size());
     REQUIRE(vec.capacity() >= source.size());
+    REQUIRE(vec.front() == 3);
+    REQUIRE(vec.back() == 3);
+}
+
+TEST_CASE("small_vector(InputIter, InputIter)", "[constructor]")
+{
+    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+
+    std::istringstream source(std::string(size, 'c'));
+
+    small_vector<char> vec{ std::istream_iterator<char>(source), std::istream_iterator<char>() };
+
+    REQUIRE(vec.size() == size);
+    REQUIRE(vec.capacity() >= size);
+    REQUIRE(std::all_of(vec.begin(), vec.end(), equal_to('c')));
 }
 
 TEMPLATE_TEST_CASE("small_vector(initializer_list)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
@@ -160,6 +208,7 @@ TEMPLATE_TEST_CASE("small_vector(initializer_list)", "[constructor]", TrivialTyp
     REQUIRE(vec.is_small());
     REQUIRE(vec.size() == 3);
     REQUIRE(vec.capacity() >= 3);
+    REQUIRE(vec.back() == 2);
 }
 
 TEMPLATE_TEST_CASE("small_vector(initializer_list, Alloc)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
@@ -169,6 +218,7 @@ TEMPLATE_TEST_CASE("small_vector(initializer_list, Alloc)", "[constructor]", Tri
     REQUIRE(vec.is_small());
     REQUIRE(vec.size() == 3);
     REQUIRE(vec.capacity() >= 3);
+    REQUIRE(vec.back() == 2);
 }
 
 TEMPLATE_TEST_CASE("small_vector(const small_vector&)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
@@ -225,9 +275,22 @@ TEMPLATE_TEST_CASE("small_vector<MoveOnlyType>(small_vector&&)", "[constructor]"
     //             ASSIGNMENT            //
     //-----------------------------------//
 
-TEMPLATE_TEST_CASE("assign(Iter, Iter)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
+TEMPLATE_TEST_CASE("assign(size_t count, const T& val)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t src_size = GENERATE(SMALL_SIZE, LARGE_SIZE + 1);
+    const size_t count = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
+    const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+
+    small_vector dest(dest_size, TestType{ 2 });
+
+    dest.assign(count, TestType{ 3 });
+
+    REQUIRE(dest.size() == count);
+    REQUIRE(std::all_of(dest.begin(), dest.end(), equal_to<TestType>(3)));
+}
+
+TEMPLATE_TEST_CASE("assign(FwdIter, FwdIter)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
+{
+    const size_t src_size = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
     const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
 
     const small_vector source(src_size, TestType{ 4 });
@@ -237,11 +300,34 @@ TEMPLATE_TEST_CASE("assign(Iter, Iter)", "[assignment]", TrivialType, NonTrivial
 
     REQUIRE(dest.size() == source.size());
     REQUIRE(dest == source);
+
+
+    small_vector dest2 = dest;
+    dest2.reserve(2 * source.size());
+    dest2.assign(source.begin(), source.end());
+
+    REQUIRE(dest.size() == source.size());
+    REQUIRE(dest == source);
+}
+
+TEST_CASE("assign(InputIter, InputIter)", "[assignment]")
+{
+    const size_t src_size = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
+    const size_t dst_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+
+    std::istringstream source(std::string(src_size, 'c'));
+    small_vector<char> dest(dst_size);
+
+    dest.assign(std::istream_iterator<char>(source), std::istream_iterator<char>());
+
+    REQUIRE(dest.size() == src_size);
+    REQUIRE(dest.capacity() >= src_size);
+    REQUIRE(std::all_of(dest.begin(), dest.end(), equal_to('c')));
 }
 
 TEMPLATE_TEST_CASE("operator=(const small_vector&)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t src_size = GENERATE(SMALL_SIZE, LARGE_SIZE + 1);
+    const size_t src_size = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
     const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
 
     const small_vector source(src_size, TestType{ 4 });
@@ -251,11 +337,19 @@ TEMPLATE_TEST_CASE("operator=(const small_vector&)", "[assignment]", TrivialType
 
     REQUIRE(dest.size() == source.size());
     REQUIRE(dest == source);
+
+
+    small_vector dest2 = dest;
+    dest2.reserve(2 * source.size());
+    dest2 = source;
+
+    REQUIRE(dest.size() == source.size());
+    REQUIRE(dest == source);
 }
 
 TEMPLATE_TEST_CASE("operator=(small_vector&&)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t src_size = GENERATE(SMALL_SIZE, LARGE_SIZE + 1);
+    const size_t src_size = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
     const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
 
     small_vector source(src_size, TestType{ 4 });
@@ -285,20 +379,20 @@ TEMPLATE_TEST_CASE("operator=(initializer_list)", "[assignment]", TrivialType, N
     //             ITERATORS             //
     //-----------------------------------//
 
-TEMPLATE_TEST_CASE("forward iteration", "[iterators]", TrivialType, NonTrivialType)
+TEMPLATE_TEST_CASE("forward_iteration", "[iterators]", TrivialType, NonTrivialType)
 {
     const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
     const small_vector vec(size, TestType{ 1 });
 
-    for (const auto& elem : vec) REQUIRE(elem == TestType{ 1 });
+    REQUIRE(std::all_of(vec.begin(), vec.end(), equal_to(TestType{ 1 })));
 }
 
-TEMPLATE_TEST_CASE("reverse iteration", "[iterators]", TrivialType, NonTrivialType)
+TEMPLATE_TEST_CASE("reverse_iteration", "[iterators]", TrivialType, NonTrivialType)
 {
     const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
     const small_vector vec(size, TestType{ 1 });
 
-    for (auto it = vec.rbegin(); it != vec.rend(); ++it) REQUIRE(*it == TestType{ 1 });
+    REQUIRE(std::all_of(vec.rbegin(), vec.rend(), equal_to(TestType{ 1 })));
 }
 
     //-----------------------------------//
@@ -425,7 +519,9 @@ TEMPLATE_TEST_CASE("emplace_back(...)", "[modifiers]", TrivialType, NonTrivialTy
 
     small_vector<TestType> vec(size);
 
-    vec.emplace_back();
+    const TestType& val = vec.emplace_back();
+    REQUIRE(val == TestType{});
+
     for (size_t i = 0; i < LARGE_SIZE; i++) vec.emplace_back(1);
 
     REQUIRE(vec.size() == size + LARGE_SIZE + 1);
@@ -439,8 +535,10 @@ TEMPLATE_TEST_CASE("pop_back()", "[modifiers]", TrivialType, NonTrivialType, Mov
     small_vector<TestType> vec(size);
 
     vec.pop_back();
+    REQUIRE(vec.size() == (size - 1));
 
-    REQUIRE(vec.size() == size - 1);
+    vec.pop_back();
+    REQUIRE(vec.size() == (size - 2));
 }
 
 TEMPLATE_TEST_CASE("resize(n)", "[modifiers]", TrivialType, NonTrivialType, MoveOnlyType)
@@ -472,14 +570,19 @@ TEMPLATE_TEST_CASE("resize(n, value)", "[modifiers]", TrivialType, NonTrivialTyp
 TEMPLATE_TEST_CASE("erase(pos)", "[modifiers]", TrivialType, NonTrivialType, MoveOnlyType)
 {
     const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+
     small_vector<TestType> vec(size);
     vec.front() = TestType{ 2 };
 
-    vec.erase(vec.begin());
+    auto it1 = vec.erase(vec.begin());
+
+    REQUIRE(it1 == vec.begin());
     REQUIRE(vec.size() == size - 1);
     REQUIRE(vec.front() == TestType{});
 
-    vec.erase(vec.end() - 1);
+    auto it2 = vec.erase(vec.end() - 1);
+
+    REQUIRE(it2 == vec.end());
     REQUIRE(vec.size() == size - 2);
 }
 
@@ -489,28 +592,39 @@ TEMPLATE_TEST_CASE("erase(first, last)", "[modifiers]", TrivialType, NonTrivialT
 
     SECTION("front")
     {
-        vec.erase(vec.begin(), vec.begin() + 1);
+        auto it = vec.erase(vec.begin(), vec.begin() + 1);
+
         REQUIRE(vec == small_vector{ TestType{ 1 }, TestType{ 2 }, TestType{ 3 }, TestType{ 4 } });
+        REQUIRE(*it == TestType{ 1 });
     }
     SECTION("back")
     {
-        vec.erase(vec.end() - 1, vec.end());
+        auto it = vec.erase(vec.end() - 1, vec.end());
+
         REQUIRE(vec == small_vector{ TestType{ 0 }, TestType{ 1 }, TestType{ 2 }, TestType{ 3 } });
+        REQUIRE(it == vec.end());
     }
     SECTION("nothing")
     {
-        vec.erase(vec.begin(), vec.begin());
+        auto it = vec.erase(vec.begin(), vec.begin());
+
         REQUIRE(vec == small_vector{ TestType{ 0 }, TestType{ 1 }, TestType{ 2 }, TestType{ 3 }, TestType{ 4 } });
+        REQUIRE(it == vec.begin());
     }
     SECTION("everything")
     {
-        vec.erase(vec.begin(), vec.end());
+        auto it = vec.erase(vec.begin(), vec.end());
+
         REQUIRE(vec.empty());
+        REQUIRE(it == vec.end());
+
     }
     SECTION("middle")
     {
-        vec.erase(vec.begin() + 1, vec.begin() + 3);
+        auto it = vec.erase(vec.begin() + 1, vec.begin() + 3);
+
         REQUIRE(vec == small_vector{ TestType{ 0 }, TestType{ 3 }, TestType{ 4 } });
+        REQUIRE(*it == TestType{ 3 });
     }
 }
 
@@ -521,22 +635,29 @@ TEMPLATE_TEST_CASE("insert(pos, const T&)", "[modifiers]", TrivialType, NonTrivi
 
     SECTION("front")
     {
-        vec.insert(vec.begin(), value);
+        auto it = vec.insert(vec.begin(), value);
+
         REQUIRE(vec == small_vector{ TestType{ 21 }, TestType{ 0 }, TestType{ 1 }, TestType{ 2 }, TestType{ 3 } });
+        REQUIRE(*it == value);
     }
     SECTION("back")
     {
-        vec.insert(vec.end(), value);
+        auto it = vec.insert(vec.end(), value);
+
         REQUIRE(vec == small_vector{ TestType{ 0 }, TestType{ 1 }, TestType{ 2 }, TestType{ 3 }, TestType{ 21 } });
+        REQUIRE(*it == value);
     }
     SECTION("middle")
     {
-        vec.insert(vec.begin() + 2, value);
+        auto it = vec.insert(vec.begin() + 2, value);
+
         REQUIRE(vec == small_vector{ TestType{ 0 }, TestType{ 1 }, TestType{ 21 }, TestType{ 2 }, TestType{ 3 } });
+        REQUIRE(*it == value);
     }
     SECTION("many")
     {
         for (size_t i = 0; i < 100; i++) vec.insert(vec.begin(), value);
+
         REQUIRE(vec.size() == 104);
         REQUIRE(vec.front() == TestType{ 21 });
         REQUIRE(vec.back() == TestType{ 3 });
@@ -549,75 +670,192 @@ TEMPLATE_TEST_CASE("insert(pos, T&&)", "[modifiers]", TrivialType, NonTrivialTyp
 
     SECTION("front")
     {
-        vec.insert(vec.begin(), TestType{ 21 });
+        auto it = vec.insert(vec.begin(), TestType{ 21 });
+
         REQUIRE(vec == small_vector{ TestType{ 21 }, TestType{ 0 }, TestType{ 1 }, TestType{ 2 }, TestType{ 3 } });
+        REQUIRE(*it == TestType{ 21 });
+
     }
     SECTION("back")
     {
-        vec.insert(vec.end(), TestType{ 21 });
+        auto it = vec.insert(vec.end(), TestType{ 21 });
+
         REQUIRE(vec == small_vector{ TestType{ 0 }, TestType{ 1 }, TestType{ 2 }, TestType{ 3 }, TestType{ 21 } });
+        REQUIRE(*it == TestType{ 21 });
     }
     SECTION("middle")
     {
-        vec.insert(vec.begin() + 2, TestType{ 21 });
+        auto it = vec.insert(vec.begin() + 2, TestType{ 21 });
+
         REQUIRE(vec == small_vector{ TestType{ 0 }, TestType{ 1 }, TestType{ 21 }, TestType{ 2 }, TestType{ 3 } });
+        REQUIRE(*it == TestType{ 21 });
     }
     SECTION("many")
     {
         for (size_t i = 0; i < 100; i++) vec.insert(vec.begin(), TestType{ 21 });
+
         REQUIRE(vec.size() == 104);
         REQUIRE(vec.front() == TestType{ 21 });
         REQUIRE(vec.back() == TestType{ 3 });
     }
 }
 
-TEMPLATE_TEST_CASE("insert(pos, iter, iter)", "[modifiers]", TrivialType, NonTrivialType)
+TEMPLATE_TEST_CASE("insert(pos, count, const T&)", "[modifiers]", TrivialType, NonTrivialType)
+{
+    small_vector dest{ TestType{ 0 }, TestType{ 1 } };
+
+    SECTION("front")
+    {
+        auto it = dest.insert(dest.begin(), 3, TestType{ 4 });
+
+        REQUIRE(dest == small_vector{ TestType{ 4 }, TestType{ 4 }, TestType{ 4 }, TestType{ 0 }, TestType{ 1 } });
+        REQUIRE(it == dest.begin());
+        REQUIRE(*it == TestType{ 4 });
+    }
+    SECTION("back")
+    {
+        auto it = dest.insert(dest.end(), 3, TestType{ 4 });
+
+        REQUIRE(dest == small_vector{ TestType{ 0 }, TestType{ 1 }, TestType{ 4 }, TestType{ 4 }, TestType{ 4 } });
+        REQUIRE(it == (dest.begin() + 2));
+        REQUIRE(*it == TestType{ 4 });
+    }
+    SECTION("middle")
+    {
+        auto it = dest.insert(dest.begin() + 1, 3, TestType{ 4 });
+
+        REQUIRE(dest == small_vector{ TestType{ 0 }, TestType{ 4 }, TestType{ 4 }, TestType{ 4 }, TestType{ 1 } });
+        REQUIRE(it == (dest.begin() + 1));
+        REQUIRE(*it == TestType{ 4 });
+    }
+    SECTION("nothing")
+    {
+        auto it = dest.insert(dest.end(), 0, TestType{ 4 });
+
+        REQUIRE(dest == small_vector{ TestType{ 0 }, TestType{ 1 } });
+        REQUIRE(it == dest.end());
+    }
+    SECTION("many")
+    {
+        for (size_t i = 0; i < 100; i++) dest.insert(dest.begin(), 3, TestType{ 4 });
+
+        REQUIRE(dest.size() == 302);
+        REQUIRE(dest.front() == TestType{ 4 });
+        REQUIRE(dest.back() == TestType{ 1 });
+    }
+}
+
+TEMPLATE_TEST_CASE("insert(pos, FwdIter, FwdIter)", "[modifiers]", TrivialType, NonTrivialType)
 {
     small_vector dest{ TestType{ 0 }, TestType{ 1 } };
     const small_vector src{ TestType{ 2 }, TestType{ 3 }, TestType{ 4 } };
 
     SECTION("front")
     {
-        dest.insert(dest.begin(), src.begin(), src.end());
+        auto it = dest.insert(dest.begin(), src.begin(), src.end());
+
         REQUIRE(dest == small_vector{ TestType{ 2 }, TestType{ 3 }, TestType{ 4 }, TestType{ 0 }, TestType{ 1 } });
+        REQUIRE(*it == TestType{ 2 });
     }
     SECTION("back")
     {
-        dest.insert(dest.end(), src.begin(), src.end());
+        auto it = dest.insert(dest.end(), src.begin(), src.end());
+
         REQUIRE(dest == small_vector{ TestType{ 0 }, TestType{ 1 }, TestType{ 2 }, TestType{ 3 }, TestType{ 4 } });
+        REQUIRE(*it == TestType{ 2 });
     }
     SECTION("middle")
     {
-        dest.insert(dest.begin() + 1, src.begin(), src.end());
+        auto it = dest.insert(dest.begin() + 1, src.begin(), src.end());
+
         REQUIRE(dest == small_vector{ TestType{ 0 }, TestType{ 2 }, TestType{ 3 }, TestType{ 4 }, TestType{ 1 } });
+        REQUIRE(*it == TestType{ 2 });
     }
     SECTION("empty")
     {
-        dest.insert(dest.end(), src.begin(), src.begin());
+        auto it = dest.insert(dest.end(), src.begin(), src.begin());
+
         REQUIRE(dest == small_vector{ TestType{ 0 }, TestType{ 1 } });
+        REQUIRE(it == dest.end());
     }
     SECTION("many")
     {
         for (size_t i = 0; i < 100; i++) dest.insert(dest.begin(), src.begin(), src.end());
+
         REQUIRE(dest.size() == 100 * src.size() + 2);
         REQUIRE(dest.front() == TestType{ 2 });
         REQUIRE(dest.back() == TestType{ 1 });
     }
 }
 
-TEMPLATE_TEST_CASE("emplace(pos, ...)", "[modifiers]", TrivialType, NonTrivialType, MoveOnlyType)
+TEST_CASE("insert(pos, InputIter, InputIter)", "[modifiers]")
+{
+    small_vector<char> dest(2, 'a');
+    std::istringstream src(std::string(3, 'c'));
+
+    SECTION("front")
+    {
+        auto it = dest.insert(dest.begin(), std::istream_iterator<char>(src), std::istream_iterator<char>());
+
+        REQUIRE(dest == small_vector{ 'c', 'c', 'c', 'a', 'a' });
+        REQUIRE(it == dest.begin());
+    }
+    SECTION("back")
+    {
+        auto it = dest.insert(dest.end(), std::istream_iterator<char>(src), std::istream_iterator<char>());
+
+        REQUIRE(dest == small_vector{ 'a', 'a', 'c', 'c', 'c' });
+        REQUIRE(it == (dest.begin() + 2));
+        REQUIRE(*it == 'c');
+    }
+    SECTION("middle")
+    {
+        auto it = dest.insert(dest.begin() + 1, std::istream_iterator<char>(src), std::istream_iterator<char>());
+
+        REQUIRE(dest == small_vector{ 'a', 'c', 'c', 'c', 'a' });
+        REQUIRE(it == (dest.begin() + 1));
+        REQUIRE(*it == 'c');
+    }
+    SECTION("empty")
+    {
+        auto it = dest.insert(dest.end(), std::istream_iterator<char>(), std::istream_iterator<char>());
+
+        REQUIRE(dest == small_vector{ 'a', 'a' });
+        REQUIRE(it == dest.end());
+    }
+    SECTION("many")
+    {
+        for (size_t i = 0; i < 100; i++)
+        {
+            std::istringstream input(std::string(3, 'c'));
+            dest.insert(dest.begin(), std::istream_iterator<char>(input), std::istream_iterator<char>());
+        }
+
+        REQUIRE(dest.size() == 302);
+        REQUIRE(dest.front() == 'c');
+        REQUIRE(dest.back() == 'a');
+    }
+}
+
+TEMPLATE_TEST_CASE("emplace(pos, Args&&...)", "[modifiers]", TrivialType, NonTrivialType, MoveOnlyType)
 {
     small_vector<TestType> vec(2);
 
-    vec.emplace(vec.begin(), 1);
+    auto it1 = vec.emplace(vec.begin(), 1);
+
+    REQUIRE(*it1 == 1);
     REQUIRE(vec.size() == 3);
     REQUIRE(vec.front() == TestType{ 1 });
 
-    vec.emplace(vec.end(), 2);
+    auto it2 = vec.emplace(vec.end(), 2);
+
+    REQUIRE(*it2 == 2);
     REQUIRE(vec.size() == 4);
     REQUIRE(vec.back() == TestType{ 2 });
 
-    vec.emplace(vec.begin() + 1);
+    auto it3 = vec.emplace(vec.begin() + 1);
+
+    REQUIRE(*it3 == TestType{});
     REQUIRE(vec.size() == 5);
 
     for (size_t i = 0; i < 100; i++) vec.emplace(vec.begin());

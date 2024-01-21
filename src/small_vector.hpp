@@ -27,7 +27,7 @@
 
 namespace detail
 {
-    //----------------------------------------- HELPER TYPE TRAITS ---------------------------------------------------
+    //----------------------------------------- HELPER TYPE TRAITS ------------------------------------------------------
 
     template<typename Allocator>
     using alloc_pointer_t = typename std::allocator_traits<Allocator>::pointer;
@@ -144,7 +144,7 @@ namespace detail
         std::allocator_traits<A>::construct(allocator, at, std::forward<Args>(args)...);
     }
 
-    //--------------------------- CONSTRUCT / DESTROY RANGE IN UNINITIALIZED MEMORY ---------------------------------------
+    //--------------------------- CONSTRUCT / DESTROY RANGE IN UNINITIALIZED MEMORY -------------------------------------
 
     template<typename T, typename A>
     constexpr void destroy_range(A& allocator, T* first, T* last) noexcept
@@ -182,7 +182,7 @@ namespace detail
     }
 
     // construct from range
-    template<typename T, typename A, std::forward_iterator Iter>
+    template<typename T, typename A, std::input_iterator Iter>
     constexpr void construct_range(A& allocator, T* first, T* last, Iter src_first)
     noexcept(noexcept(detail::construct(allocator, first, *src_first)))
     {
@@ -241,9 +241,16 @@ namespace detail
 
     template<typename T, std::forward_iterator Iter>
     constexpr void assign_range(T* first, T* last, Iter src_first)
-    noexcept(std::is_nothrow_assignable_v<T&, decltype(*src_first)>)
+    noexcept(std::is_nothrow_assignable_v<T&, std::iter_reference_t<Iter>>)
     {
         std::copy(src_first, src_first + std::distance(first, last), first);
+    }
+
+    template<typename T>
+    constexpr void assign_range(T* first, T* last, const T& value)
+    noexcept(std::is_nothrow_copy_assignable_v<T>)
+    {
+        std::fill(first, last, value);
     }
 
     //------------------------------------ ALLOCATOR MANGAGED OBJECT ----------------------------------------------------
@@ -382,6 +389,16 @@ public:
         guard.release();
     }
 
+    template<std::input_iterator Iter>
+    small_vector(Iter src_first, Iter src_last, const A& allocator = A()) :
+        first_(buffer_.begin()),
+        last_(buffer_.begin()),
+        last_alloc_(buffer_.end()),
+        alloc_(allocator)
+    {
+        while (src_first != src_last) emplace_back(*src_first++);
+    }
+
     small_vector(std::initializer_list<T> init, const A& allocator = A()) :
         small_vector(init.begin(), init.end(), allocator)
     {}
@@ -427,17 +444,44 @@ public:
     //             ASSIGNMENT            //
     //-----------------------------------//
 
+    void assign(size_type count, const T& value)
+    {
+        const auto src_size = static_cast<difference_type>(count);
+        const auto old_size = std::distance(first_, last_);
+        const auto com_size = std::min(old_size, src_size);
+
+        if (capacity() >= count)
+        {
+            detail::assign_range(first_, first_ + com_size, value);
+            detail::construct_range(alloc_, first_ + com_size, first_ + src_size, value);
+            detail::destroy_range(alloc_, first_ + com_size, last_);
+            last_ = first_ + src_size;
+        }
+        else
+        {
+            size_type new_cap = next_capacity(count);
+            pointer new_first = detail::allocate<T>(alloc_, new_cap);
+            scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_cap); } };
+            detail::construct_range(alloc_, new_first, new_first + src_size, value);
+            detail::destroy_range(alloc_, first_, last_);
+            guard.release();
+            deallocate();
+            set_storage(new_first, count, new_cap);
+        }
+    }
+
     template<std::forward_iterator Iter>
     void assign(Iter src_first, Iter src_last)
     {
         const auto src_size = std::distance(src_first, src_last);
         const auto old_size = std::distance(first_, last_);
+        const auto com_size = std::min(old_size, src_size);
 
         if (capacity() >= size_type(src_size))
         {
-            detail::assign_range(first_, first_ + std::min(old_size, src_size), src_first);
-            if (old_size < src_size) detail::construct_range(alloc_, first_ + old_size, first_ + src_size, src_first + old_size);
-            else if (old_size > src_size) detail::destroy_range(alloc_, first_ + src_size, last_);
+            detail::assign_range(first_, first_ + com_size, src_first);
+            detail::construct_range(alloc_, first_ + com_size, first_ + src_size, src_first + com_size);
+            detail::destroy_range(alloc_, first_ + com_size, last_);
             last_ = first_ + src_size;
         }
         else
@@ -451,6 +495,23 @@ public:
             deallocate();
             set_storage(new_first, src_size, new_cap);
         }
+    }
+
+    template<std::input_iterator Iter>
+    void assign(Iter src_first, Iter src_last)
+    {
+        pointer next = first_;
+        while (next != last_ && src_first != src_last) { *next++ = *src_first++; }
+
+        detail::destroy_range(alloc_, next, last_);
+        last_ = next;
+
+        while (src_first != src_last) { emplace_back(*src_first++); }
+    }
+
+    void assign(std::initializer_list<T> list)
+    {
+        assign(list.begin(), list.end());
     }
 
     small_vector& operator=(const small_vector& other)
@@ -709,25 +770,61 @@ public:
         return first_ + offset;
     }
 
+    iterator insert(const_iterator pos, size_type count, const T& value)
+    {
+        const auto offset = std::distance(cbegin(), pos);
+        const auto src_size = static_cast<difference_type>(count);
+        const auto new_size = size() + count;
+
+        reserve(new_size);
+
+        const auto middle = std::max(last_ - src_size, first_ + offset);
+        const auto moved_size = last_ - middle;
+        const auto new_last = last_ + src_size;
+        const auto new_middle = last_ + src_size - moved_size;
+        const auto old_last = last_;
+
+        detail::construct_range(alloc_, last_, new_middle, value);
+        last_ = new_middle;
+        detail::relocate_range_weak(alloc_, middle, old_last, new_middle);
+        last_ = new_last;
+        detail::assign_range(middle, old_last, value);
+
+        return first_ + offset;
+    }
+
     template<std::forward_iterator Iter>
     iterator insert(const_iterator pos, Iter src_first, Iter src_last)
     {
         const auto offset = std::distance(cbegin(), pos);
         const auto src_size = std::distance(src_first, src_last);
+        const auto new_size = size() + src_size;
 
-        reserve(size() + src_size);
+        reserve(new_size);
 
         const auto middle = std::max(last_ - src_size, first_ + offset);
         const auto moved_size = last_ - middle;
         const auto new_last   = last_ + src_size;
         const auto new_middle = last_ + src_size - moved_size;
+        const auto old_last   = last_;
 
-        detail::relocate_range_weak(alloc_, middle, last_, new_middle);
-        scope_exit guard{ [&] { detail::destroy_range(alloc_, new_middle, new_last); } };
-        detail::assign_range(middle, last_, src_first);
         detail::construct_range(alloc_, last_, new_middle, src_first + moved_size);
+        last_ = new_middle;
+        detail::relocate_range_weak(alloc_, middle, old_last, new_middle);
         last_ = new_last;
-        guard.release();
+        detail::assign_range(middle, old_last, src_first);
+
+        return first_ + offset;
+    }
+
+    template<std::input_iterator Iter>
+    iterator insert(const_iterator pos, Iter src_first, Iter src_last)
+    {
+        const auto offset = std::distance(cbegin(), pos);
+        const auto old_size = std::distance(first_, last_);
+
+        while (src_first != src_last) emplace_back(*src_first++);
+        std::rotate(first_ + offset, first_ + difference_type(old_size), last_);
 
         return first_ + offset;
     }
@@ -856,7 +953,7 @@ private:
 
 }; // class small_vector
 
-template<std::forward_iterator Iter, std::size_t Size = detail::default_small_size_v<std::iter_value_t<Iter>>, typename Alloc = std::allocator<std::iter_value_t<Iter>>>
+template<std::input_iterator Iter, std::size_t Size = detail::default_small_size_v<std::iter_value_t<Iter>>, typename Alloc = std::allocator<std::iter_value_t<Iter>>>
 small_vector(Iter, Iter, Alloc = Alloc()) -> small_vector<std::iter_value_t<Iter>, Size, Alloc>;
 
 template<typename T, std::size_t Size, typename A>

@@ -398,13 +398,14 @@ public:
         }
         else
         {
-            pointer new_first = detail::allocate<T>(alloc_, src_size);
-            scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, src_size); } };
+            size_type new_cap = next_capacity(size_type(src_size));
+            pointer new_first = detail::allocate<T>(alloc_, new_cap);
+            scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_cap); } };
             detail::construct_range(alloc_, new_first, new_first + src_size, src_first);
             detail::destroy_range(alloc_, first_, last_);
             guard.release();
             deallocate();
-            set_storage(new_first, src_size, src_size);
+            set_storage(new_first, src_size, new_cap);
         }
     }
 
@@ -539,7 +540,7 @@ public:
     bool is_small() const noexcept { return first_ == buffer_.begin(); }
     static constexpr size_type small_capacity() noexcept { return Size; }
 
-    void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(new_capacity); }
+    void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(next_capacity(new_capacity)); }
     void shrink_to_fit() {}
 
     //-----------------------------------//
@@ -625,7 +626,7 @@ public:
     iterator insert(const_iterator pos, const T& value) { return emplace(pos, value); }
     iterator insert(const_iterator pos, T&& value) { return emplace(pos, std::move(value)); }
     iterator insert(const_iterator pos, std::initializer_list<T> list) { return insert(pos, list.begin(), list.end()); }
-    iterator erase(const_iterator pos) noexcept(std::is_nothrow_move_assignable_v<T>) { assert(pos != end()); return erase(pos, pos + 1); }
+    iterator erase(const_iterator pos) noexcept(std::is_nothrow_move_assignable_v<T>) { return erase(pos, pos + 1); }
 
     template<typename... Args>
     iterator emplace(const_iterator pos, Args&&... args)
@@ -717,8 +718,6 @@ private:
 
     void reallocate_n(size_type new_capacity)
     {
-        assert(new_capacity > capacity());
-
         const size_type old_size = size();
 
         pointer new_first = detail::allocate<T>(alloc_, new_capacity);
@@ -733,8 +732,6 @@ private:
     template<typename... Args>
     void reallocate_append(size_type new_capacity, Args&&... args)
     {
-        assert(new_capacity > capacity());
-
         const size_type old_size = size();
 
         pointer new_first = detail::allocate<T>(alloc_, new_capacity);
@@ -763,7 +760,7 @@ private:
         }
         else if (count > size())
         {
-            if (count > capacity()) reallocate_n(count);
+            reserve(count);
             detail::construct_range(alloc_, last_, first_ + count, std::forward<Args>(args)...);
             last_ = first_ + count;
         }
@@ -786,9 +783,9 @@ private:
         set_storage(buffer_.begin(), buffer_.begin() + size, buffer_.end());
     }
 
-    size_type next_capacity() const noexcept
+    size_type next_capacity(size_type min_capacity = 0) const noexcept
     {
-        return size_type(growth_factor_ * capacity()) + 1;
+        return std::max(min_capacity, size_type(growth_factor_ * capacity()) + 1);
     }
 
 }; // class small_vector

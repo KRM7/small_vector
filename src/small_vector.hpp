@@ -244,7 +244,6 @@ namespace detail
         auto end() const noexcept { return reinterpret_cast<const T*>(std::addressof(data_[0])) + Size; }
 
         constexpr std::size_t size() const noexcept { return Size; }
-
     private:
         inline constexpr static std::size_t align_req = (alignof(T) > Align) ? alignof(T) : Align;
         inline constexpr static std::size_t buffer_size = sizeof(T) * Size;
@@ -307,7 +306,7 @@ public:
         alloc_(allocator)
     {}
 
-    explicit small_vector(size_type count, const A& allocator = {}) :
+    explicit small_vector(size_type count, const A& allocator = A()) :
         alloc_(allocator)
     {
         allocate_n(count);
@@ -317,7 +316,7 @@ public:
         guard.release();
     }
 
-    small_vector(size_type count, const T& value, const A& allocator = {}) :
+    small_vector(size_type count, const T& value, const A& allocator = A()) :
         alloc_(allocator)
     {
         allocate_n(count);
@@ -328,7 +327,7 @@ public:
     }
 
     template<std::forward_iterator Iter>
-    small_vector(Iter src_first, Iter src_last, const A& allocator = {}) :
+    small_vector(Iter src_first, Iter src_last, const A& allocator = A()) :
         alloc_(allocator)
     {
         const auto src_len = std::distance(src_first, src_last);
@@ -339,7 +338,7 @@ public:
         guard.release();
     }
 
-    small_vector(std::initializer_list<T> init, const A& allocator = {}) :
+    small_vector(std::initializer_list<T> init, const A& allocator = A()) :
         small_vector(init.begin(), init.end(), allocator)
     {}
 

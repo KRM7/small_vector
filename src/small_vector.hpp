@@ -36,7 +36,24 @@ namespace detail
     using alloc_size_t = typename std::allocator_traits<Allocator>::size_type;
 
 
-    // 'Allocator' has a trivial construct method for the type 'T' with the arguments 'TArgs'
+    template<typename Allocator>
+    inline constexpr bool copy_allocators_v = std::allocator_traits<Allocator>::propagate_on_container_copy_assignment::value &&
+        !std::allocator_traits<Allocator>::is_always_equal::value;
+
+    template<typename Allocator>
+    inline constexpr bool move_allocators_v = std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value &&
+        !std::allocator_traits<Allocator>::is_always_equal::value;
+
+    template<typename Allocator>
+    inline constexpr bool swap_allocators_v = std::allocator_traits<Allocator>::propagate_on_container_swap::value &&
+        !std::allocator_traits<Allocator>::is_always_equal::value;
+
+    template<typename Allocator>
+    inline constexpr bool steal_pointers_v = std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value ||
+        std::allocator_traits<Allocator>::is_always_equal::value;
+
+
+    // 'Allocator' has a trivial construct method for the type 'T' with the arguments 'Args'
     // if calling allocator_traits<Allocator>::construct is equivalent to directly calling the
     // constructor of T
     template<typename Allocator, typename T, typename... Args>
@@ -413,7 +430,7 @@ public:
     {
         if (std::addressof(other) == this) [[unlikely]] return *this;
 
-        if constexpr (std::allocator_traits<A>::propagate_on_container_copy_assignment::value)
+        if constexpr (detail::copy_allocators_v<A>)
         {
             if (alloc_ != other.alloc_)
             {
@@ -425,6 +442,7 @@ public:
                 return *this;
             }
         }
+
         assign(other.begin(), other.end());
         return *this;
     }
@@ -435,31 +453,49 @@ public:
 
         if (!this->is_small() && !other.is_small())
         {
-            swap(other);
+            using std::swap;
+
+            if constexpr (detail::move_allocators_v<A>) swap(alloc_, other.alloc_);
+            swap(first_, other.first_);
+            swap(last_, other.last_);
+            swap(last_alloc_, other.last_alloc_);
+
             return *this;
         }
-        if (this->is_small() && !other.is_small())
+
+        if (!other.is_small())
         {
-            detail::destroy_range(alloc_, first_, last_);
-            if constexpr (std::allocator_traits<A>::propagate_on_container_move_assignment::value) { alloc_ = std::move(other.alloc_); }
-            this->set_storage(other.first_, other.last_, other.last_alloc_);
-            other.set_storage(nullptr, nullptr, nullptr);
-            return *this;
+            if constexpr (detail::steal_pointers_v<A>)
+            {
+                detail::destroy_range(alloc_, first_, last_);
+                this->set_storage(other.first_, other.last_, other.last_alloc_);
+                other.set_buffer_storage(0);
+                alloc_ = std::move(other.alloc_);
+                return *this;
+            }
+            else if (alloc_ == other.alloc_)
+            {
+                detail::destroy_range(alloc_, first_, last_);
+                this->set_storage(other.first_, other.last_, other.last_alloc_);
+                other.set_buffer_storage(0);
+                return *this;
+            }
         }
-        if constexpr (std::allocator_traits<A>::propagate_on_container_move_assignment::value)
+
+        if constexpr (detail::move_allocators_v<A>)
         {
             if (alloc_ != other.alloc_)
             {
                 reset();
-                alloc_ = std::move(other.alloc_);
-                allocate_n(other.size());
-                detail::relocate_range_weak(alloc_, other.first_, other.last_, first_);
+                detail::relocate_range_weak(other.alloc_, other.first_, other.last_, first_);
                 last_ = first_ + other.size();
-                detail::destroy_range(alloc_, other.first_, other.last_);
-                other.last_ = other.first_;
+                detail::destroy_range(other.alloc_, other.first_, other.last_);
+                other.set_buffer_storage(0);
+                alloc_ = std::move(other.alloc_);
                 return *this;
             }
         }
+
         assign(std::make_move_iterator(other.first_), std::make_move_iterator(other.last_));
         return *this;
     }
@@ -567,10 +603,9 @@ public:
 
         if (!this->is_small() && !other.is_small())
         {
-            using std::swap;
-            swap(first_, other.first_);
-            swap(last_, other.last_);
-            swap(last_alloc_, other.last_alloc_);
+            std::swap(first_, other.first_);
+            std::swap(last_, other.last_);
+            std::swap(last_alloc_, other.last_alloc_);
         }
         else if (this->is_small() && other.is_small())
         {
@@ -579,7 +614,7 @@ public:
             const auto small_size = small.size();
 
             std::swap_ranges(small.first_, small.last_, big.first_);
-            detail::relocate_range_strong(small.alloc_, big.first_ + small.size(), big.last_, small.last_);
+            detail::relocate_range_strong(big.alloc_, big.first_ + small.size(), big.last_, small.last_);
             detail::destroy_range(big.alloc_, big.first_ + small.size(), big.last_);
 
             small.set_buffer_storage(big.size());
@@ -591,14 +626,14 @@ public:
             small_vector& small = this->is_small() ? *this : other;
             const auto small_size = small.size();
 
-            detail::relocate_range_strong(big.alloc_, small.first_, small.last_, big.buffer_.begin());
+            detail::relocate_range_strong(small.alloc_, small.first_, small.last_, big.buffer_.begin());
             detail::destroy_range(small.alloc_, small.first_, small.last_);
 
             small.set_storage(big.first_, big.last_, big.last_alloc_);
             big.set_buffer_storage(small_size);
         }
 
-        if constexpr (std::allocator_traits<A>::propagate_on_container_swap::value)
+        if constexpr (detail::swap_allocators_v<A>)
         {
             using std::swap;
             swap(alloc_, other.alloc_);

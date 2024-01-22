@@ -36,23 +36,6 @@ namespace detail
     using alloc_size_t = typename std::allocator_traits<Allocator>::size_type;
 
 
-    template<typename Allocator>
-    inline constexpr bool copy_allocators_v = std::allocator_traits<Allocator>::propagate_on_container_copy_assignment::value &&
-        !std::allocator_traits<Allocator>::is_always_equal::value;
-
-    template<typename Allocator>
-    inline constexpr bool move_allocators_v = std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value &&
-        !std::allocator_traits<Allocator>::is_always_equal::value;
-
-    template<typename Allocator>
-    inline constexpr bool swap_allocators_v = std::allocator_traits<Allocator>::propagate_on_container_swap::value &&
-        !std::allocator_traits<Allocator>::is_always_equal::value;
-
-    template<typename Allocator>
-    inline constexpr bool steal_pointers_v = std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value ||
-        std::allocator_traits<Allocator>::is_always_equal::value;
-
-
     // 'Allocator' has a trivial construct method for the type 'T' with the arguments 'Args'
     // if calling allocator_traits<Allocator>::construct is equivalent to directly calling the
     // constructor of T
@@ -81,6 +64,23 @@ namespace detail
 
     template<typename T>
     inline constexpr bool is_trivially_relocatable_v = is_trivially_relocatable<T>::value;
+
+
+    template<typename Allocator>
+    inline constexpr bool copy_allocators_v = std::allocator_traits<Allocator>::propagate_on_container_copy_assignment::value &&
+        !std::allocator_traits<Allocator>::is_always_equal::value;
+
+    template<typename Allocator>
+    inline constexpr bool move_allocators_v = std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value &&
+        !std::allocator_traits<Allocator>::is_always_equal::value;
+
+    template<typename Allocator>
+    inline constexpr bool swap_allocators_v = std::allocator_traits<Allocator>::propagate_on_container_swap::value &&
+        !std::allocator_traits<Allocator>::is_always_equal::value;
+
+    template<typename Allocator>
+    inline constexpr bool steal_pointers_v = std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value ||
+        std::allocator_traits<Allocator>::is_always_equal::value;
 
 
     //----------------------------------------- ALLOCATE / DEALLOCATE ---------------------------------------------------
@@ -113,11 +113,7 @@ namespace detail
     constexpr void construct(A& allocator, T* at)
     noexcept(std::is_nothrow_default_constructible_v<T> && has_trivial_construct_v<A&, T>)
     {
-        if constexpr (std::is_trivially_default_constructible_v<T> && has_trivial_construct_v<A&, T>)
-        {
-            std::memset(at, 0, sizeof(T));
-        }
-        else { std::allocator_traits<A>::construct(allocator, at); }
+        std::allocator_traits<A>::construct(allocator, at);
     }
 
     // copy construct
@@ -159,15 +155,17 @@ namespace detail
     {
         if constexpr (std::is_trivially_default_constructible_v<T> && has_trivial_construct_v<A&, T>)
         {
-            std::memset(first, 0, sizeof(T) * (last - first));
+            if (!std::is_constant_evaluated())
+            {
+                std::memset(first, 0, sizeof(T) * (last - first));
+                return;
+            }
         }
-        else
-        {
-            T* next = first;
-            scope_exit guard{ [&] { detail::destroy_range(allocator, first, next); } };
-            for (; next != last; ++next) detail::construct(allocator, next);
-            guard.release();
-        }
+
+        T* next = first;
+        scope_exit guard{ [&] { detail::destroy_range(allocator, first, next); } };
+        for (; next != last; ++next) detail::construct(allocator, next);
+        guard.release();
     }
 
     // copy construct
@@ -190,15 +188,17 @@ namespace detail
 
         if constexpr (std::contiguous_iterator<Iter> && std::is_trivially_constructible_v<T, R> && has_trivial_construct_v<A&, T, R>)
         {
-            std::memcpy(first, std::addressof(*src_first), sizeof(T) * (last - first));
+            if (!std::is_constant_evaluated())
+            {
+                std::memcpy(first, std::addressof(*src_first), sizeof(T) * (last - first));
+                return;
+            }
         }
-        else
-        {
-            T* next = first;
-            scope_exit guard{ [&] { detail::destroy_range(allocator, first, next); } };
-            for (; next != last; ++next, ++src_first) detail::construct(allocator, next, *src_first);
-            guard.release();
-        }
+
+        T* next = first;
+        scope_exit guard{ [&] { detail::destroy_range(allocator, first, next); } };
+        for (; next != last; ++next, ++src_first) detail::construct(allocator, next, *src_first);
+        guard.release();
     }
 
     // move construct from another range if noexcept
@@ -208,15 +208,17 @@ namespace detail
     {
         if constexpr (is_trivially_relocatable_v<T> && has_trivial_construct_v<A&, T, T&&>)
         {
-            std::memcpy(dest, first, sizeof(T) * (last - first));
+            if (!std::is_constant_evaluated())
+            {
+                std::memcpy(dest, first, sizeof(T) * (last - first));
+                return;
+            }
         }
-        else
-        {
-            T* next = dest;
-            scope_exit guard{ [&] { detail::destroy_range(allocator, dest, next); } };
-            for (; first != last; ++first, ++next) detail::construct(allocator, next, std::move_if_noexcept(*first));
-            guard.release();
-        }
+
+        T* next = dest;
+        scope_exit guard{ [&] { detail::destroy_range(allocator, dest, next); } };
+        for (; first != last; ++first, ++next) detail::construct(allocator, next, std::move_if_noexcept(*first));
+        guard.release();
     }
 
     // move construct from another range
@@ -226,15 +228,17 @@ namespace detail
     {
         if constexpr (is_trivially_relocatable_v<T> && has_trivial_construct_v<A&, T, T&&>)
         {
-            std::memcpy(dest, first, sizeof(T) * (last - first));
+            if (!std::is_constant_evaluated())
+            {
+                std::memcpy(dest, first, sizeof(T) * (last - first));
+                return;
+            }
         }
-        else
-        {
-            T* next = dest;
-            scope_exit guard{ [&] { detail::destroy_range(allocator, dest, next); } };
-            for (; first != last; ++first, ++next) detail::construct(allocator, next, std::move(*first));
-            guard.release();
-        }
+
+        T* next = dest;
+        scope_exit guard{ [&] { detail::destroy_range(allocator, dest, next); } };
+        for (; first != last; ++first, ++next) detail::construct(allocator, next, std::move(*first));
+        guard.release();
     }
 
     //---------------------------------------- ASSIGNMENT METHODS -------------------------------------------------------
@@ -260,23 +264,26 @@ namespace detail
     {
     public:
         template<typename... Args>
-        allocator_managed(Allocator& alloc, Args&&... args) :
+        constexpr allocator_managed(Allocator& alloc, Args&&... args) :
             alloc_(alloc)
         {
             detail::construct(alloc_, std::addressof(**this), std::forward<Args>(args)...);
         }
 
-        ~allocator_managed() noexcept
+        constexpr ~allocator_managed() noexcept
         {
             detail::destroy(alloc_, std::addressof(**this));
         }
 
-        T& operator*() noexcept { return *std::launder(reinterpret_cast<T*>(std::addressof(data_[0]))); }
+        constexpr T& operator*() noexcept { return data_; }
+        constexpr const T& operator*() const noexcept { return data_; }
 
     private:
-        using storage_type = unsigned char[sizeof(T)];
-
-        alignas(T) storage_type data_;
+        union
+        {
+            unsigned char dummy_ = {};
+            T data_;
+        };
         Allocator& alloc_;
     };
 
@@ -288,20 +295,24 @@ namespace detail
     struct small_vector_buffer
     {
     public:
-        auto begin() noexcept { return std::launder(reinterpret_cast<T*>(std::addressof(data_[0]))); }
-        auto begin() const noexcept { return std::launder(reinterpret_cast<const T*>(std::addressof(data_[0]))); }
+        constexpr small_vector_buffer() noexcept {};
+        constexpr ~small_vector_buffer() noexcept {};
 
-        auto end() noexcept { return reinterpret_cast<T*>(std::addressof(data_[0])) + Size; }
-        auto end() const noexcept { return reinterpret_cast<const T*>(std::addressof(data_[0])) + Size; }
+        constexpr auto begin() noexcept { return std::addressof(data_[0]); }
+        constexpr auto begin() const noexcept { return std::addressof(data_[0]); }
+
+        constexpr auto end() noexcept { return std::addressof(data_[Size]); }
+        constexpr auto end() const noexcept { return std::addressof(data_[Size]); }
 
         constexpr std::size_t size() const noexcept { return Size; }
     private:
-        inline constexpr static std::size_t align_req = (alignof(T) > Align) ? alignof(T) : Align;
-        inline constexpr static std::size_t buffer_size = sizeof(T) * Size;
+        inline constexpr static std::size_t align_req = std::max(alignof(T), Align);
 
-        using storage_type = unsigned char[buffer_size];
-
-        alignas(align_req) storage_type data_;
+        union
+        {
+            unsigned char dummy_ = {};
+            alignas(align_req) T data_[Size];
+        };
     };
 
 
@@ -344,20 +355,20 @@ public:
     //            CONSTRUCTORS           //
     //-----------------------------------//
 
-    small_vector() noexcept(std::is_nothrow_default_constructible_v<A>) :
+    constexpr small_vector() noexcept(std::is_nothrow_default_constructible_v<A>) :
         first_(buffer_.begin()),
         last_(buffer_.begin()),
         last_alloc_(buffer_.end())
     {}
 
-    explicit small_vector(const A& allocator) noexcept(std::is_nothrow_copy_constructible_v<A>) :
+    constexpr explicit small_vector(const A& allocator) noexcept(std::is_nothrow_copy_constructible_v<A>) :
         first_(buffer_.begin()),
         last_(buffer_.begin()),
         last_alloc_(buffer_.end()),
         alloc_(allocator)
     {}
 
-    explicit small_vector(size_type count, const A& allocator = A()) :
+    constexpr explicit small_vector(size_type count, const A& allocator = A()) :
         alloc_(allocator)
     {
         allocate_n(count);
@@ -367,7 +378,7 @@ public:
         guard.release();
     }
 
-    small_vector(size_type count, const T& value, const A& allocator = A()) :
+    constexpr small_vector(size_type count, const T& value, const A& allocator = A()) :
         alloc_(allocator)
     {
         allocate_n(count);
@@ -378,7 +389,7 @@ public:
     }
 
     template<std::forward_iterator Iter>
-    small_vector(Iter src_first, Iter src_last, const A& allocator = A()) :
+    constexpr small_vector(Iter src_first, Iter src_last, const A& allocator = A()) :
         alloc_(allocator)
     {
         const auto src_len = std::distance(src_first, src_last);
@@ -390,7 +401,7 @@ public:
     }
 
     template<std::input_iterator Iter>
-    small_vector(Iter src_first, Iter src_last, const A& allocator = A()) :
+    constexpr small_vector(Iter src_first, Iter src_last, const A& allocator = A()) :
         first_(buffer_.begin()),
         last_(buffer_.begin()),
         last_alloc_(buffer_.end()),
@@ -399,19 +410,19 @@ public:
         while (src_first != src_last) emplace_back(*src_first++);
     }
 
-    small_vector(std::initializer_list<T> init, const A& allocator = A()) :
+    constexpr small_vector(std::initializer_list<T> init, const A& allocator = A()) :
         small_vector(init.begin(), init.end(), allocator)
     {}
 
-    small_vector(const small_vector& other) :
+    constexpr small_vector(const small_vector& other) :
         small_vector(other.begin(), other.end(), std::allocator_traits<A>::select_on_container_copy_construction(other.alloc_))
     {}
 
-    small_vector(const small_vector& other, const A& allocator) :
+    constexpr small_vector(const small_vector& other, const A& allocator) :
         small_vector(other.begin(), other.end(), allocator)
     {}
 
-    small_vector(small_vector&& other) noexcept(std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A&, T, T&&>) :
+    constexpr small_vector(small_vector&& other) noexcept(std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A&, T, T&&>) :
         alloc_(std::move(other.alloc_))
     {
         if (other.is_small())
@@ -434,7 +445,7 @@ public:
     //             DESTRUCTOR            //
     //-----------------------------------//
 
-    ~small_vector() noexcept
+    constexpr ~small_vector() noexcept
     {
         detail::destroy_range(alloc_, first_, last_);
         deallocate();
@@ -444,7 +455,7 @@ public:
     //             ASSIGNMENT            //
     //-----------------------------------//
 
-    void assign(size_type count, const T& value)
+    constexpr void assign(size_type count, const T& value)
     {
         const auto src_size = static_cast<difference_type>(count);
         const auto old_size = std::distance(first_, last_);
@@ -471,7 +482,7 @@ public:
     }
 
     template<std::forward_iterator Iter>
-    void assign(Iter src_first, Iter src_last)
+    constexpr void assign(Iter src_first, Iter src_last)
     {
         const auto src_size = std::distance(src_first, src_last);
         const auto old_size = std::distance(first_, last_);
@@ -498,7 +509,7 @@ public:
     }
 
     template<std::input_iterator Iter>
-    void assign(Iter src_first, Iter src_last)
+    constexpr void assign(Iter src_first, Iter src_last)
     {
         pointer next = first_;
         while (next != last_ && src_first != src_last) { *next++ = *src_first++; }
@@ -509,12 +520,12 @@ public:
         while (src_first != src_last) { emplace_back(*src_first++); }
     }
 
-    void assign(std::initializer_list<T> list)
+    constexpr void assign(std::initializer_list<T> list)
     {
         assign(list.begin(), list.end());
     }
 
-    small_vector& operator=(const small_vector& other)
+    constexpr small_vector& operator=(const small_vector& other)
     {
         if (std::addressof(other) == this) [[unlikely]] return *this;
 
@@ -535,7 +546,7 @@ public:
         return *this;
     }
 
-    small_vector& operator=(small_vector&& other)
+    constexpr small_vector& operator=(small_vector&& other)
     noexcept(std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A&, T, T&&> &&
              std::is_nothrow_move_assignable_v<T> &&
              detail::steal_pointers_v<A>)
@@ -591,7 +602,7 @@ public:
         return *this;
     }
 
-    small_vector& operator=(std::initializer_list<T> list)
+    constexpr small_vector& operator=(std::initializer_list<T> list)
     {
         assign(list.begin(), list.end());
         return *this;
@@ -601,93 +612,93 @@ public:
     //             ITERATORS             //
     //-----------------------------------//
 
-    iterator begin() noexcept { return first_; }
-    const_iterator begin() const noexcept { return first_; }
-    const_iterator cbegin() const noexcept { return first_; }
+    constexpr iterator begin() noexcept { return first_; }
+    constexpr const_iterator begin() const noexcept { return first_; }
+    constexpr const_iterator cbegin() const noexcept { return first_; }
 
-    iterator end() noexcept { return last_; }
-    const_iterator end() const noexcept { return last_; }
-    const_iterator cend() const noexcept { return last_; }
+    constexpr iterator end() noexcept { return last_; }
+    constexpr const_iterator end() const noexcept { return last_; }
+    constexpr const_iterator cend() const noexcept { return last_; }
 
-    reverse_iterator rbegin() noexcept { return std::make_reverse_iterator(last_); }
-    const_reverse_iterator rbegin() const noexcept { return std::make_reverse_iterator(last_); }
-    const_reverse_iterator crbegin() const noexcept { return std::make_reverse_iterator(last_); }
+    constexpr reverse_iterator rbegin() noexcept { return std::make_reverse_iterator(last_); }
+    constexpr const_reverse_iterator rbegin() const noexcept { return std::make_reverse_iterator(last_); }
+    constexpr const_reverse_iterator crbegin() const noexcept { return std::make_reverse_iterator(last_); }
 
-    reverse_iterator rend() noexcept { return std::make_reverse_iterator(first_); }
-    const_reverse_iterator rend() const noexcept { return std::make_reverse_iterator(first_); }
-    const_reverse_iterator crend() const noexcept { return std::make_reverse_iterator(first_); }
+    constexpr reverse_iterator rend() noexcept { return std::make_reverse_iterator(first_); }
+    constexpr const_reverse_iterator rend() const noexcept { return std::make_reverse_iterator(first_); }
+    constexpr const_reverse_iterator crend() const noexcept { return std::make_reverse_iterator(first_); }
 
     //-----------------------------------//
     //           ELEMENT ACCESS          //
     //-----------------------------------//
 
-    reference operator[](size_type pos) noexcept
+    constexpr reference operator[](size_type pos) noexcept
     {
         assert(pos < size());
         return first_[pos];
     }
 
-    const_reference operator[](size_type pos) const noexcept
+    constexpr const_reference operator[](size_type pos) const noexcept
     {
         assert(pos < size());
         return first_[pos];
     }
      
-    reference at(size_type pos)
+    constexpr reference at(size_type pos)
     {
         if (pos >= size()) throw std::out_of_range{ "Bad vector index." };
         return first_[pos];
     }
 
-    const_reference at(size_type pos) const
+    constexpr const_reference at(size_type pos) const
     {
         if (pos >= size()) throw std::out_of_range{ "Bad vector index." };
         return first_[pos];
     }
 
-    reference front() noexcept { assert(!empty()); return *first_; }
-    const_reference front() const noexcept { assert(!empty()); return *first_; }
+    constexpr reference front() noexcept { assert(!empty()); return *first_; }
+    constexpr const_reference front() const noexcept { assert(!empty()); return *first_; }
 
-    reference back() noexcept { assert(!empty()); return *(last_ - 1); }
-    const_reference back() const noexcept { assert(!empty()); return *(last_ - 1); }
+    constexpr reference back() noexcept { assert(!empty()); return *(last_ - 1); }
+    constexpr const_reference back() const noexcept { assert(!empty()); return *(last_ - 1); }
 
-    pointer data() noexcept { return first_; }
-    const_pointer data() const noexcept { return first_; }
+    constexpr pointer data() noexcept { return first_; }
+    constexpr const_pointer data() const noexcept { return first_; }
 
     //-----------------------------------//
     //              CAPACITY             //
     //-----------------------------------//
 
-    bool empty() const noexcept { return first_ == last_; }
+    constexpr bool empty() const noexcept { return first_ == last_; }
 
-    size_type size() const noexcept { return size_type(last_ - first_); }
-    size_type capacity() const noexcept { return size_type(last_alloc_ - first_); }
-    size_type max_size() const noexcept { return std::allocator_traits<A>::max_size(alloc_); }
+    constexpr size_type size() const noexcept { return size_type(last_ - first_); }
+    constexpr size_type capacity() const noexcept { return size_type(last_alloc_ - first_); }
+    constexpr size_type max_size() const noexcept { return std::allocator_traits<A>::max_size(alloc_); }
     
-    bool is_small() const noexcept { return first_ == buffer_.begin(); }
+    constexpr bool is_small() const noexcept { return first_ == buffer_.begin(); }
     static constexpr size_type small_capacity() noexcept { return Size; }
 
-    void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(next_capacity(new_capacity)); }
-    void shrink_to_fit() {}
+    constexpr void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(next_capacity(new_capacity)); }
+    constexpr void shrink_to_fit() {}
 
     //-----------------------------------//
     //             MODIFIERS             //
     //-----------------------------------//
 
-    void clear() noexcept
+    constexpr void clear() noexcept
     {
         detail::destroy_range(alloc_, first_, last_);
         last_ = first_;
     }
 
-    void reset() noexcept
+    constexpr void reset() noexcept
     {
         detail::destroy_range(alloc_, first_, last_);
         deallocate();
         set_buffer_storage(0);
     }
 
-    void swap(small_vector& other)
+    constexpr void swap(small_vector& other)
     noexcept(std::is_nothrow_swappable_v<T> && std::is_nothrow_move_constructible_v<T> && detail::has_trivial_construct_v<A&, T, T&&>)
     {
         if (std::addressof(other) == this) [[unlikely]] return;
@@ -731,11 +742,11 @@ public:
         }
     }
 
-    void push_back(const T& value) { emplace_back(value); }
-    void push_back(T&& value) { emplace_back(std::move(value)); }
+    constexpr void push_back(const T& value) { emplace_back(value); }
+    constexpr void push_back(T&& value) { emplace_back(std::move(value)); }
 
     template<typename... Args>
-    reference emplace_back(Args&&... args)
+    constexpr reference emplace_back(Args&&... args)
     {
         if (size() == capacity())
             reallocate_append(next_capacity(), std::forward<Args>(args)...);
@@ -744,18 +755,18 @@ public:
         return back();
     }
 
-    void pop_back() noexcept { assert(!empty()); detail::destroy(alloc_, last_--); }
+    constexpr void pop_back() noexcept { assert(!empty()); detail::destroy(alloc_, last_--); }
 
-    void resize(size_type count) { resize_impl(count); }
-    void resize(size_type count, const T& value) { resize_impl(count, value); }
+    constexpr void resize(size_type count) { resize_impl(count); }
+    constexpr void resize(size_type count, const T& value) { resize_impl(count, value); }
 
-    iterator insert(const_iterator pos, const T& value) { return emplace(pos, value); }
-    iterator insert(const_iterator pos, T&& value) { return emplace(pos, std::move(value)); }
-    iterator insert(const_iterator pos, std::initializer_list<T> list) { return insert(pos, list.begin(), list.end()); }
-    iterator erase(const_iterator pos) noexcept(std::is_nothrow_move_assignable_v<T>) { return erase(pos, pos + 1); }
+    constexpr iterator insert(const_iterator pos, const T& value) { return emplace(pos, value); }
+    constexpr iterator insert(const_iterator pos, T&& value) { return emplace(pos, std::move(value)); }
+    constexpr iterator insert(const_iterator pos, std::initializer_list<T> list) { return insert(pos, list.begin(), list.end()); }
+    constexpr iterator erase(const_iterator pos) noexcept(std::is_nothrow_move_assignable_v<T>) { return erase(pos, pos + 1); }
 
     template<typename... Args>
-    iterator emplace(const_iterator pos, Args&&... args)
+    constexpr iterator emplace(const_iterator pos, Args&&... args)
     {
         if (pos == cend()) return std::addressof(emplace_back(std::forward<Args>(args)...));
 
@@ -765,12 +776,12 @@ public:
 
         if (size() == capacity()) reallocate_n(next_capacity());
         detail::construct(alloc_, last_, std::move(back()));
-        std::shift_right(first_ + offset, last_++, 1);
+        std::shift_right(first_ + offset, last_++, 1); // elements after pos are moved twice because of reallocate, need separate branches for enough cap/reallocate
         *(first_ + offset) = std::move(*new_elem);
         return first_ + offset;
     }
 
-    iterator insert(const_iterator pos, size_type count, const T& value)
+    constexpr iterator insert(const_iterator pos, size_type count, const T& value)
     {
         const auto offset = std::distance(cbegin(), pos);
         const auto src_size = static_cast<difference_type>(count);
@@ -794,7 +805,7 @@ public:
     }
 
     template<std::forward_iterator Iter>
-    iterator insert(const_iterator pos, Iter src_first, Iter src_last)
+    constexpr iterator insert(const_iterator pos, Iter src_first, Iter src_last)
     {
         const auto offset = std::distance(cbegin(), pos);
         const auto src_size = std::distance(src_first, src_last);
@@ -818,7 +829,7 @@ public:
     }
 
     template<std::input_iterator Iter>
-    iterator insert(const_iterator pos, Iter src_first, Iter src_last)
+    constexpr iterator insert(const_iterator pos, Iter src_first, Iter src_last)
     {
         const auto offset = std::distance(cbegin(), pos);
         const auto old_size = std::distance(first_, last_);
@@ -829,7 +840,7 @@ public:
         return first_ + offset;
     }
 
-    iterator erase(const_iterator first, const_iterator last) noexcept(std::is_nothrow_move_assignable_v<T>)
+    constexpr iterator erase(const_iterator first, const_iterator last) noexcept(std::is_nothrow_move_assignable_v<T>)
     {
         const auto erase_first = first_ + std::distance(cbegin(), first);
         const auto erase_count = std::distance(first, last);
@@ -843,14 +854,14 @@ public:
     //               OTHER               //
     //-----------------------------------//
 
-    allocator_type get_allocator() const noexcept(std::is_nothrow_copy_constructible_v<A>) { return alloc_; }
+    constexpr allocator_type get_allocator() const noexcept(std::is_nothrow_copy_constructible_v<A>) { return alloc_; }
 
-    friend bool operator==(const small_vector& lhs, const small_vector& rhs) noexcept
+    constexpr friend bool operator==(const small_vector& lhs, const small_vector& rhs) noexcept
     {
         return std::equal(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
     }
 
-    friend auto operator<=>(const small_vector& lhs, const small_vector& rhs) noexcept
+    constexpr friend auto operator<=>(const small_vector& lhs, const small_vector& rhs) noexcept
     {
         return std::lexicographical_compare_three_way(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
     }
@@ -866,7 +877,7 @@ private:
     static inline constexpr double growth_factor_ = 1.618;
 
 
-    void allocate_n(size_type count)
+    constexpr void allocate_n(size_type count)
     {
         if (count <= buffer_.size())
         {
@@ -879,7 +890,7 @@ private:
         }
     }
 
-    void reallocate_n(size_type new_capacity)
+    constexpr void reallocate_n(size_type new_capacity)
     {
         const size_type old_size = size();
 
@@ -893,7 +904,7 @@ private:
     }
 
     template<typename... Args>
-    void reallocate_append(size_type new_capacity, Args&&... args)
+    constexpr void reallocate_append(size_type new_capacity, Args&&... args)
     {
         const size_type old_size = size();
 
@@ -908,13 +919,13 @@ private:
         set_storage(new_first, old_size + 1, new_capacity); 
     }
 
-    void deallocate() noexcept
+    constexpr void deallocate() noexcept
     {
         if (!is_small() && data()) detail::deallocate(alloc_, first_, capacity());
     }
 
     template<typename... Args>
-    void resize_impl(size_type count, Args&&... args)
+    constexpr void resize_impl(size_type count, Args&&... args)
     {
         if (count < size())
         {
@@ -929,24 +940,24 @@ private:
         }
     }
 
-    void set_storage(pointer first, pointer last, pointer last_alloc) noexcept
+    constexpr void set_storage(pointer first, pointer last, pointer last_alloc) noexcept
     {
         first_ = first;
         last_ = last;
         last_alloc_ = last_alloc;
     }
 
-    void set_storage(pointer first, size_type size, size_type capacity) noexcept
+    constexpr void set_storage(pointer first, size_type size, size_type capacity) noexcept
     {
         set_storage(first, first + size, first + capacity);
     }
 
-    void set_buffer_storage(size_type size) noexcept
+    constexpr void set_buffer_storage(size_type size) noexcept
     {
         set_storage(buffer_.begin(), buffer_.begin() + size, buffer_.end());
     }
 
-    size_type next_capacity(size_type min_capacity = 0) const noexcept
+    constexpr size_type next_capacity(size_type min_capacity = 0) const noexcept
     {
         return std::max(min_capacity, size_type(growth_factor_ * capacity()) + 1);
     }
@@ -957,7 +968,7 @@ template<std::input_iterator Iter, std::size_t Size = detail::default_small_size
 small_vector(Iter, Iter, Alloc = Alloc()) -> small_vector<std::iter_value_t<Iter>, Size, Alloc>;
 
 template<typename T, std::size_t Size, typename A>
-void swap(small_vector<T, Size, A>& lhs, small_vector<T, Size, A>& rhs)
+constexpr void swap(small_vector<T, Size, A>& lhs, small_vector<T, Size, A>& rhs)
 noexcept(noexcept(lhs.swap(rhs)))
 {
     lhs.swap(rhs);

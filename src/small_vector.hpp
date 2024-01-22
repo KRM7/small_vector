@@ -3,8 +3,8 @@
 #ifndef SMALL_VECTOR_SMALL_VECTOR_HPP
 #define SMALL_VECTOR_SMALL_VECTOR_HPP
 
-#include "scope_exit.hpp"
 #include <algorithm>
+#include <functional>
 #include <iterator>
 #include <initializer_list>
 #include <memory>
@@ -27,6 +27,34 @@
 
 namespace detail
 {
+    //-------------------------------------------- SCOPE EXIT -----------------------------------------------------------
+
+    template<typename F>
+    class [[nodiscard]] scope_exit
+    {
+    public:
+        constexpr explicit scope_exit(F on_exit)
+        noexcept(std::is_nothrow_move_constructible_v<F>) :
+            on_exit_(std::move(on_exit))
+        {}
+
+        scope_exit(const scope_exit&)            = delete;
+        scope_exit(scope_exit&&)                 = delete;
+        scope_exit& operator=(const scope_exit&) = delete;
+        scope_exit& operator=(scope_exit&&)      = delete;
+
+        constexpr ~scope_exit() noexcept
+        {
+            if (active_) [[unlikely]] std::invoke(std::move(on_exit_));
+        }
+
+        constexpr void release() noexcept { active_ = false; }
+
+    private:
+        F on_exit_;
+        bool active_ = true;
+    };
+
     //----------------------------------------- HELPER TYPE TRAITS ------------------------------------------------------
 
     template<typename Allocator>
@@ -372,7 +400,7 @@ public:
         alloc_(allocator)
     {
         allocate_n(count);
-        scope_exit guard{ [&] { deallocate(); } };
+        detail::scope_exit guard{ [&] { deallocate(); } };
         detail::construct_range(alloc_, first_, first_ + count);
         last_ = first_ + count;
         guard.release();
@@ -382,7 +410,7 @@ public:
         alloc_(allocator)
     {
         allocate_n(count);
-        scope_exit guard{ [&] { deallocate(); } };
+        detail::scope_exit guard{ [&] { deallocate(); } };
         detail::construct_range(alloc_, first_, first_ + count, value);
         last_ = first_ + count;
         guard.release();
@@ -394,7 +422,7 @@ public:
     {
         const auto src_len = std::distance(src_first, src_last);
         allocate_n(src_len);
-        scope_exit guard{ [&] { deallocate(); } };
+        detail::scope_exit guard{ [&] { deallocate(); } };
         detail::construct_range(alloc_, first_, first_ + src_len, src_first);
         last_ = first_ + src_len;
         guard.release();
@@ -472,7 +500,7 @@ public:
         {
             size_type new_cap = next_capacity(count);
             pointer new_first = detail::allocate<T>(alloc_, new_cap);
-            scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_cap); } };
+            detail::scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_cap); } };
             detail::construct_range(alloc_, new_first, new_first + src_size, value);
             detail::destroy_range(alloc_, first_, last_);
             guard.release();
@@ -499,7 +527,7 @@ public:
         {
             size_type new_cap = next_capacity(size_type(src_size));
             pointer new_first = detail::allocate<T>(alloc_, new_cap);
-            scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_cap); } };
+            detail::scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_cap); } };
             detail::construct_range(alloc_, new_first, new_first + src_size, src_first);
             detail::destroy_range(alloc_, first_, last_);
             guard.release();
@@ -776,7 +804,7 @@ public:
 
         if (size() == capacity()) reallocate_n(next_capacity());
         detail::construct(alloc_, last_, std::move(back()));
-        std::shift_right(first_ + offset, last_++, 1); // elements after pos are moved twice because of reallocate, need separate branches for enough cap/reallocate
+        std::shift_right(first_ + offset, last_++, 1);
         *(first_ + offset) = std::move(*new_elem);
         return first_ + offset;
     }
@@ -895,7 +923,7 @@ private:
         const size_type old_size = size();
 
         pointer new_first = detail::allocate<T>(alloc_, new_capacity);
-        scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_capacity); } };
+        detail::scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_capacity); } };
         detail::relocate_range_strong(alloc_, first_, last_, new_first);
         detail::destroy_range(alloc_, first_, last_);
         guard.release();
@@ -909,9 +937,9 @@ private:
         const size_type old_size = size();
 
         pointer new_first = detail::allocate<T>(alloc_, new_capacity);
-        scope_exit guard1{ [&] { detail::deallocate(alloc_, new_first, new_capacity); } };
+        detail::scope_exit guard1{ [&] { detail::deallocate(alloc_, new_first, new_capacity); } };
         detail::construct(alloc_, new_first + old_size, std::forward<Args>(args)...);
-        scope_exit guard2{ [&] { detail::destroy(alloc_, new_first + old_size); } };
+        detail::scope_exit guard2{ [&] { detail::destroy(alloc_, new_first + old_size); } };
         detail::relocate_range_strong(alloc_, first_, last_, new_first);
         { guard1.release(); guard2.release(); }
         detail::destroy_range(alloc_, first_, last_);

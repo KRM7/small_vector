@@ -85,6 +85,24 @@ constexpr auto equal_to(T rhs)
 
 
     //-----------------------------------//
+    //           OBJECT LAYOUT           //
+    //-----------------------------------//
+
+
+TEST_CASE("small_vector_size", "[object_layout][!mayfail]") // fails under clang-cl because of no support for no_unique_address
+{
+    STATIC_REQUIRE(std::is_standard_layout_v<small_vector<int>>);
+    STATIC_REQUIRE(std::is_standard_layout_v<small_vector<int, 0>>);
+
+    CHECK(sizeof(small_vector<int>) == detail::cache_line_size);
+    CHECK(alignof(small_vector<int>) == detail::cache_line_size);
+    
+    CHECK(sizeof(small_vector<int, 0>) == 3 * sizeof(int*));
+    CHECK(alignof(small_vector<int, 0>) == alignof(int*));
+}
+
+
+    //-----------------------------------//
     //            CONSTRUCTORS           //
     //-----------------------------------//
 

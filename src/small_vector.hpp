@@ -18,12 +18,10 @@
 #include <cstddef>
 #include <cassert>
 
-#if defined(_MSC_VER) && !defined(__clang__)
+#if defined(_MSC_VER)
 #   define SV_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
-#elif __has_cpp_attribute(no_unique_address)
-#   define SV_NO_UNIQUE_ADDRESS [[no_unique_address]]
 #else
-#   define SV_NO_UNIQUE_ADDRESS
+#   define SV_NO_UNIQUE_ADDRESS [[no_unique_address]]
 #endif
 
 namespace detail
@@ -320,7 +318,7 @@ namespace detail
 
     inline constexpr std::size_t cache_line_size = 64;
 
-    template<typename T, std::size_t Size, std::size_t Align = cache_line_size>
+    template<typename T, std::size_t Size>
     struct small_vector_buffer
     {
     public:
@@ -335,13 +333,23 @@ namespace detail
 
         constexpr std::size_t size() const noexcept { return Size; }
     private:
-        inline constexpr static std::size_t align_req = std::max(alignof(T), Align);
-
         union
         {
             unsigned char dummy_ = {};
-            alignas(align_req) std::array<T, Size> data_;
+            std::array<T, Size> data_;
         };
+    };
+
+    template<typename T>
+    struct small_vector_buffer<T, 0>
+    {
+        constexpr T* begin() noexcept { return nullptr; }
+        constexpr const T* begin() const noexcept { return nullptr; }
+
+        constexpr T* end() noexcept { return nullptr; }
+        constexpr const T* end() const noexcept { return nullptr; }
+
+        constexpr std::size_t size() const noexcept { return 0; }
     };
 
 
@@ -896,14 +904,15 @@ public:
     }
 
 private:
+    static constexpr double growth_factor = 1.618;
+    static constexpr std::size_t alignment = !!Size * std::max(alignof(T), detail::cache_line_size);
 
-    detail::small_vector_buffer<T, Size> buffer_;
+    alignas(alignment)
+    SV_NO_UNIQUE_ADDRESS detail::small_vector_buffer<T, Size> buffer_;
     pointer first_      = nullptr;
     pointer last_       = nullptr;
     pointer last_alloc_ = nullptr;
     SV_NO_UNIQUE_ADDRESS allocator_type alloc_;
-
-    static inline constexpr double growth_factor_ = 1.618;
 
 
     constexpr void allocate_n(size_type count)
@@ -988,7 +997,7 @@ private:
 
     constexpr size_type next_capacity(size_type min_capacity = 0) const noexcept
     {
-        return std::max(min_capacity, size_type(growth_factor_ * capacity()) + 1);
+        return std::max(min_capacity, size_type(growth_factor * capacity()) + 1);
     }
 
 }; // class small_vector

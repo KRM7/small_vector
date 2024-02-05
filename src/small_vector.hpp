@@ -3,6 +3,7 @@
 #ifndef SMALL_VECTOR_SMALL_VECTOR_HPP
 #define SMALL_VECTOR_SMALL_VECTOR_HPP
 
+#include <array>
 #include <algorithm>
 #include <functional>
 #include <iterator>
@@ -326,11 +327,11 @@ namespace detail
         constexpr small_vector_buffer() noexcept {};
         constexpr ~small_vector_buffer() noexcept {};
 
-        constexpr auto begin() noexcept { return std::addressof(data_[0]); }
-        constexpr auto begin() const noexcept { return std::addressof(data_[0]); }
+        constexpr auto begin() noexcept { return data_.data(); }
+        constexpr auto begin() const noexcept { return data_.data(); }
 
-        constexpr auto end() noexcept { return std::addressof(data_[Size]); }
-        constexpr auto end() const noexcept { return std::addressof(data_[Size]); }
+        constexpr auto end() noexcept { return data_.data() + Size; }
+        constexpr auto end() const noexcept { return data_.data() + Size; }
 
         constexpr std::size_t size() const noexcept { return Size; }
     private:
@@ -339,7 +340,7 @@ namespace detail
         union
         {
             unsigned char dummy_ = {};
-            alignas(align_req) T data_[Size];
+            alignas(align_req) std::array<T, Size> data_;
         };
     };
 

@@ -92,13 +92,9 @@ constexpr auto equal_to(T rhs)
 TEST_CASE("small_vector_size", "[object_layout][!mayfail]") // fails under clang-cl because of no support for no_unique_address
 {
     STATIC_REQUIRE(std::is_standard_layout_v<small_vector<int>>);
-    STATIC_REQUIRE(std::is_standard_layout_v<small_vector<int, 0>>);
 
     CHECK(sizeof(small_vector<int>) == detail::cache_line_size);
     CHECK(alignof(small_vector<int>) == detail::cache_line_size);
-    
-    CHECK(sizeof(small_vector<int, 0>) == 3 * sizeof(int*));
-    CHECK(alignof(small_vector<int, 0>) == alignof(int*));
 }
 
 
@@ -133,24 +129,19 @@ TEMPLATE_TEST_CASE("small_vector(Alloc)", "[constructor]", TrivialType, MoveOnly
 
 TEMPLATE_TEST_CASE("small_vector(size_t)", "[constructor]", TrivialType, MoveOnlyType, ImmovableType, NonTrivialType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     small_vector<TestType> vec(size);
 
-    REQUIRE(!vec.empty());
     REQUIRE(vec.size() == size);
     REQUIRE(vec.capacity() >= size);
 }
 
 TEMPLATE_TEST_CASE("small_vector(size_t, Alloc)", "[constructor]", TrivialType, MoveOnlyType, ImmovableType, NonTrivialType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     small_vector<TestType> vec(size, std::allocator<TestType>{});
-
-    REQUIRE(!vec.empty());
-    REQUIRE(vec.begin() != vec.end());
-    REQUIRE(vec.cbegin() != vec.end());
 
     REQUIRE(vec.size() == size);
     REQUIRE(vec.capacity() >= size);
@@ -158,7 +149,7 @@ TEMPLATE_TEST_CASE("small_vector(size_t, Alloc)", "[constructor]", TrivialType, 
 
 TEMPLATE_TEST_CASE("small_vector(size_t, const T&)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     small_vector vec(size, TestType{ 0 });
 
@@ -169,7 +160,7 @@ TEMPLATE_TEST_CASE("small_vector(size_t, const T&)", "[constructor]", TrivialTyp
 
 TEMPLATE_TEST_CASE("small_vector(size_t, const T&, Alloc)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     small_vector vec(size, TestType{ 1 }, std::allocator<TestType>{});
 
@@ -180,7 +171,7 @@ TEMPLATE_TEST_CASE("small_vector(size_t, const T&, Alloc)", "[constructor]", Tri
 
 TEMPLATE_TEST_CASE("small_vector(Iter, Iter)", "[constructor]", TrivialType, MoveOnlyType, ImmovableType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     const std::vector<int> source(size, 2);
 
@@ -188,13 +179,11 @@ TEMPLATE_TEST_CASE("small_vector(Iter, Iter)", "[constructor]", TrivialType, Mov
 
     REQUIRE(vec.size() == source.size());
     REQUIRE(vec.capacity() >= source.size());
-    REQUIRE(vec.front() == 2);
-    REQUIRE(vec.back() == 2);
 }
 
 TEMPLATE_TEST_CASE("small_vector(FwdIter, FwdIter, Alloc)", "[constructor]", TrivialType, MoveOnlyType, ImmovableType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     const std::vector<int> source(size, 3);
 
@@ -202,13 +191,11 @@ TEMPLATE_TEST_CASE("small_vector(FwdIter, FwdIter, Alloc)", "[constructor]", Tri
 
     REQUIRE(vec.size() == source.size());
     REQUIRE(vec.capacity() >= source.size());
-    REQUIRE(vec.front() == 3);
-    REQUIRE(vec.back() == 3);
 }
 
 TEST_CASE("small_vector(InputIter, InputIter)", "[constructor]")
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     std::istringstream source(std::string(size, 'c'));
 
@@ -217,6 +204,13 @@ TEST_CASE("small_vector(InputIter, InputIter)", "[constructor]")
     REQUIRE(vec.size() == size);
     REQUIRE(vec.capacity() >= size);
     REQUIRE(std::all_of(vec.begin(), vec.end(), equal_to('c')));
+}
+
+TEST_CASE("small_vector(nullptr, nullptr)", "[constructor]")
+{
+    const small_vector<int> vec(static_cast<int*>(nullptr), static_cast<int*>(nullptr));
+
+    REQUIRE(vec.empty());
 }
 
 TEMPLATE_TEST_CASE("small_vector(initializer_list)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
@@ -241,7 +235,7 @@ TEMPLATE_TEST_CASE("small_vector(initializer_list, Alloc)", "[constructor]", Tri
 
 TEMPLATE_TEST_CASE("small_vector(const small_vector&)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     const small_vector source(size, TestType{ 26 });
 
@@ -253,7 +247,7 @@ TEMPLATE_TEST_CASE("small_vector(const small_vector&)", "[constructor]", Trivial
 
 TEMPLATE_TEST_CASE("small_vector(const small_vector&, Alloc)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     const small_vector source(size, TestType{ 26 });
 
@@ -265,7 +259,7 @@ TEMPLATE_TEST_CASE("small_vector(const small_vector&, Alloc)", "[constructor]", 
 
 TEMPLATE_TEST_CASE("small_vector(small_vector&&)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     small_vector source(size, TestType{ 26 });
     small_vector source_copy(source);
@@ -278,7 +272,7 @@ TEMPLATE_TEST_CASE("small_vector(small_vector&&)", "[constructor]", TrivialType,
 
 TEMPLATE_TEST_CASE("small_vector<MoveOnlyType>(small_vector&&)", "[constructor]", MoveOnlyType)
 {
-    const size_t size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     small_vector<TestType> source(size);
     small_vector<TestType> source_copy(size);
@@ -295,8 +289,8 @@ TEMPLATE_TEST_CASE("small_vector<MoveOnlyType>(small_vector&&)", "[constructor]"
 
 TEMPLATE_TEST_CASE("assign(size_t count, const T& val)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t count = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
-    const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t count = GENERATE(0, SMALL_SIZE - 1, LARGE_SIZE + 1);
+    const size_t dest_size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     small_vector dest(dest_size, TestType{ 2 });
 
@@ -308,8 +302,8 @@ TEMPLATE_TEST_CASE("assign(size_t count, const T& val)", "[assignment]", Trivial
 
 TEMPLATE_TEST_CASE("assign(FwdIter, FwdIter)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t src_size = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
-    const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t src_size = GENERATE(0, SMALL_SIZE - 1, LARGE_SIZE + 1);
+    const size_t dest_size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     const small_vector source(src_size, TestType{ 4 });
     small_vector dest(dest_size, TestType{ 3 });
@@ -330,8 +324,8 @@ TEMPLATE_TEST_CASE("assign(FwdIter, FwdIter)", "[assignment]", TrivialType, NonT
 
 TEST_CASE("assign(InputIter, InputIter)", "[assignment]")
 {
-    const size_t src_size = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
-    const size_t dst_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t src_size = GENERATE(0, SMALL_SIZE - 1, LARGE_SIZE + 1);
+    const size_t dst_size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     std::istringstream source(std::string(src_size, 'c'));
     small_vector<char> dest(dst_size);
@@ -343,10 +337,18 @@ TEST_CASE("assign(InputIter, InputIter)", "[assignment]")
     REQUIRE(std::all_of(dest.begin(), dest.end(), equal_to('c')));
 }
 
+TEST_CASE("assign(nullptr, nullptr)", "[assignment]")
+{
+    small_vector<int> vec(0, 2);
+    vec.assign(static_cast<int*>(nullptr), static_cast<int*>(nullptr));
+
+    REQUIRE(vec.empty());
+}
+
 TEMPLATE_TEST_CASE("operator=(const small_vector&)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t src_size = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
-    const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t src_size = GENERATE(0, SMALL_SIZE - 1, LARGE_SIZE + 1);
+    const size_t dest_size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     const small_vector source(src_size, TestType{ 4 });
     small_vector dest(dest_size, TestType{ 3 });
@@ -367,8 +369,8 @@ TEMPLATE_TEST_CASE("operator=(const small_vector&)", "[assignment]", TrivialType
 
 TEMPLATE_TEST_CASE("operator=(small_vector&&)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
 {
-    const size_t src_size = GENERATE(SMALL_SIZE - 1, LARGE_SIZE + 1);
-    const size_t dest_size = GENERATE(SMALL_SIZE, LARGE_SIZE);
+    const size_t src_size = GENERATE(0, SMALL_SIZE - 1, LARGE_SIZE + 1);
+    const size_t dest_size = GENERATE(0, SMALL_SIZE, LARGE_SIZE);
 
     small_vector source(src_size, TestType{ 4 });
     const small_vector src_copy(source);

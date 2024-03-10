@@ -217,7 +217,7 @@ namespace detail
         {
             if (!std::is_constant_evaluated())
             {
-                std::memcpy(first, std::addressof(*src_first), sizeof(T) * (last - first));
+                std::memcpy(first, std::to_address(src_first), sizeof(T) * (last - first));
                 return;
             }
         }
@@ -333,23 +333,7 @@ namespace detail
 
         constexpr std::size_t size() const noexcept { return Size; }
     private:
-        union
-        {
-            unsigned char dummy_ = {};
-            std::array<T, Size> data_;
-        };
-    };
-
-    template<typename T>
-    struct small_vector_buffer<T, 0>
-    {
-        constexpr T* begin() noexcept { return nullptr; }
-        constexpr const T* begin() const noexcept { return nullptr; }
-
-        constexpr T* end() noexcept { return nullptr; }
-        constexpr const T* end() const noexcept { return nullptr; }
-
-        constexpr std::size_t size() const noexcept { return 0; }
+        union { std::array<T, Size> data_; };
     };
 
 
@@ -387,6 +371,8 @@ public:
     using const_iterator         = const T*;
     using reverse_iterator       = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+
+    static_assert(Size, "The size of the inline buffer must be at least 1.");
 
     //-----------------------------------//
     //            CONSTRUCTORS           //
@@ -429,6 +415,8 @@ public:
     constexpr small_vector(Iter src_first, Iter src_last, const A& allocator = A()) :
         alloc_(allocator)
     {
+        if (src_first == src_last) return;
+
         const auto src_len = std::distance(src_first, src_last);
         allocate_n(src_len);
         detail::scope_exit guard{ [&] { deallocate(); } };

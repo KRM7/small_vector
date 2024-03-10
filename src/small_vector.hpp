@@ -704,7 +704,7 @@ public:
     static constexpr size_type small_capacity() noexcept { return Size; }
 
     constexpr void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(next_capacity(new_capacity)); }
-    constexpr void shrink_to_fit() {}
+    constexpr void shrink_to_fit() { if (size() > small_capacity()) reallocate_n(size()); }
 
     //-----------------------------------//
     //             MODIFIERS             //

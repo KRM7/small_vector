@@ -475,6 +475,17 @@ TEMPLATE_TEST_CASE("reserve", "[capacity]", TrivialType, NonTrivialType)
     REQUIRE(vec.capacity() >= 2 * LARGE_SIZE);
 }
 
+TEMPLATE_TEST_CASE("shrink_to_fit", "[capacity]", TrivialType, NonTrivialType)
+{
+    small_vector vec(LARGE_SIZE, TestType{ 2 });
+
+    vec.reserve(2 * LARGE_SIZE);
+    REQUIRE(vec.capacity() >= 2 * LARGE_SIZE);
+
+    vec.shrink_to_fit();
+    REQUIRE(vec.capacity() == LARGE_SIZE);
+}
+
     //-----------------------------------//
     //             MODIFIERS             //
     //-----------------------------------//

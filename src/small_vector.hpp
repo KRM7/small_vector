@@ -701,10 +701,10 @@ public:
     constexpr size_type max_size() const noexcept { return std::allocator_traits<A>::max_size(alloc_); }
     
     constexpr bool is_small() const noexcept { return first_ == buffer_.begin(); }
-    static constexpr size_type small_capacity() noexcept { return Size; }
+    static constexpr size_type inline_capacity() noexcept { return Size; }
 
     constexpr void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(next_capacity(new_capacity - capacity())); }
-    constexpr void shrink_to_fit() { if (size() > small_capacity()) reallocate_n(size()); }
+    constexpr void shrink_to_fit() { if (size() > inline_capacity()) reallocate_n(size()); }
 
     //-----------------------------------//
     //             MODIFIERS             //

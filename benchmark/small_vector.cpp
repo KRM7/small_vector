@@ -162,7 +162,7 @@ template<typename V>
 void benchmark_push_back_reallocate(benchmark::State& state)
 {
     const size_t final_size = state.range(0);
-    const size_t start_size = small_vector<int>::small_capacity();
+    const size_t start_size = small_vector<int>::inline_capacity();
 
     for (auto _ : state)
     {
@@ -210,7 +210,7 @@ template<typename V>
 void benchmark_insert_one_reallocate(benchmark::State& state)
 {
     const size_t final_size = state.range(0);
-    const size_t start_size = small_vector<int>::small_capacity();
+    const size_t start_size = small_vector<int>::inline_capacity();
 
     for (auto _ : state)
     {
@@ -258,7 +258,7 @@ template<typename V>
 void benchmark_insert_range_reallocate(benchmark::State& state)
 {
     const size_t final_size = state.range(0);
-    const size_t start_size = small_vector<int>::small_capacity();
+    const size_t start_size = small_vector<int>::inline_capacity();
 
     for (auto _ : state)
     {

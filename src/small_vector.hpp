@@ -495,7 +495,7 @@ public:
         }
         else
         {
-            size_type new_cap = next_capacity(count);
+            size_type new_cap = next_capacity(src_size - old_size);
             pointer new_first = detail::allocate<T>(alloc_, new_cap);
             detail::scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_cap); } };
             detail::construct_range(alloc_, new_first, new_first + src_size, value);
@@ -522,7 +522,7 @@ public:
         }
         else
         {
-            size_type new_cap = next_capacity(size_type(src_size));
+            size_type new_cap = next_capacity(size_type(src_size - old_size));
             pointer new_first = detail::allocate<T>(alloc_, new_cap);
             detail::scope_exit guard{ [&] { detail::deallocate(alloc_, new_first, new_cap); } };
             detail::construct_range(alloc_, new_first, new_first + src_size, src_first);
@@ -703,7 +703,7 @@ public:
     constexpr bool is_small() const noexcept { return first_ == buffer_.begin(); }
     static constexpr size_type small_capacity() noexcept { return Size; }
 
-    constexpr void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(next_capacity(new_capacity)); }
+    constexpr void reserve(size_type new_capacity) { if (new_capacity > capacity()) reallocate_n(next_capacity(new_capacity - capacity())); }
     constexpr void shrink_to_fit() { if (size() > small_capacity()) reallocate_n(size()); }
 
     //-----------------------------------//
@@ -892,8 +892,7 @@ public:
     }
 
 private:
-    static constexpr double growth_factor = 1.618;
-    static constexpr std::size_t alignment = !!Size * std::max(alignof(T), detail::cache_line_size);
+    static constexpr std::size_t alignment = std::max(alignof(T), detail::cache_line_size);
 
     alignas(alignment)
     SV_NO_UNIQUE_ADDRESS detail::small_vector_buffer<T, Size> buffer_;
@@ -983,9 +982,23 @@ private:
         set_storage(buffer_.begin(), buffer_.begin() + size, buffer_.end());
     }
 
-    constexpr size_type next_capacity(size_type min_capacity = 0) const noexcept
+    constexpr size_type next_capacity(size_type min_growth = 1) const
     {
-        return std::max(min_capacity, size_type(growth_factor * capacity()) + 1);
+        const size_type current_capacity = capacity();
+        const size_type growth_capacity  = current_capacity >> 1;
+        const size_type max_capacity     = max_size();
+
+        if (min_growth > max_capacity - current_capacity)
+        {
+            throw std::length_error{ "Too big vector." };
+        }
+
+        if (current_capacity > max_capacity - growth_capacity)
+        {
+            return max_capacity;
+        }
+
+        return std::max(current_capacity + min_growth, current_capacity + growth_capacity);
     }
 
 }; // class small_vector

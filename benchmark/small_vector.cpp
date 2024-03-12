@@ -72,7 +72,7 @@ void benchmark_assign_reserved(benchmark::State& state)
 
     for (auto _ : state)
     {
-        dst.resize(0);
+        dst.clear();
         benchmark::DoNotOptimize(dst);
 
         dst.assign(src.begin(), src.end());
@@ -143,7 +143,7 @@ void benchmark_push_back_reserved(benchmark::State& state)
 
     for (auto _ : state)
     {
-        vec.resize(size);
+        vec.pop_back();
         benchmark::DoNotOptimize(vec);
 
         vec.push_back(3);
@@ -191,7 +191,7 @@ void benchmark_insert_one_reserved(benchmark::State& state)
 
     for (auto _ : state)
     {
-        vec.resize(size);
+        vec.pop_back();
         benchmark::DoNotOptimize(vec);
 
         vec.insert(vec.begin(), 3);
@@ -290,7 +290,7 @@ void benchmark_erase(benchmark::State& state)
         vec.erase(vec.begin());
         benchmark::DoNotOptimize(vec);
 
-        vec.resize(size);
+        vec.push_back(1);
         benchmark::DoNotOptimize(vec);
     }
 }

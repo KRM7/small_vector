@@ -119,7 +119,7 @@ void benchmark_resize(benchmark::State& state)
 
     for (auto _ : state)
     {
-        vec.resize(size - 1);
+        vec.resize(0);
         benchmark::DoNotOptimize(vec);
 
         vec.resize(size);

@@ -978,12 +978,12 @@ private:
     template<typename... Args>
     constexpr void resize_impl(size_type count, Args&&... args)
     {
-        if (count < size())
+        if (count <= size())
         {
             detail::destroy_range(alloc_, first_ + count, last_);
             last_ = first_ + count;
         }
-        else if (count > size())
+        else
         {
             reserve(count);
             detail::construct_range(alloc_, last_, first_ + count, std::forward<Args>(args)...);

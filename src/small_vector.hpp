@@ -786,14 +786,23 @@ public:
     constexpr void push_back(const T& value) { emplace_back(value); }
     constexpr void push_back(T&& value) { emplace_back(std::move(value)); }
 
+    constexpr void push_back_unchecked(const T& value) noexcept(std::is_nothrow_copy_constructible_v<T>) { emplace_back_unchecked(value); }
+    constexpr void push_back_unchecked(T&& value) noexcept(std::is_nothrow_move_constructible_v<T>) { emplace_back_unchecked(std::move(value)); }
+
     template<typename... Args>
     constexpr reference emplace_back(Args&&... args)
     {
-        if (size() == capacity())
-            reallocate_append(next_capacity(), std::forward<Args>(args)...);
-        else
-            detail::construct(alloc_, last_++, std::forward<Args>(args)...);	
+        if (last_ != last_alloc_) return emplace_back_unchecked(std::forward<Args>(args)...);
+
+        reallocate_append(next_capacity(), std::forward<Args>(args)...);
         return back();
+    }
+
+    template<typename... Args>
+    constexpr reference emplace_back_unchecked(Args&&... args) noexcept(std::is_nothrow_constructible_v<T, Args...>)
+    {
+        detail::construct(alloc_, last_, std::forward<Args>(args)...);
+        return *last_++;
     }
 
     constexpr void pop_back() noexcept { assert(!empty()); detail::destroy(alloc_, last_--); }

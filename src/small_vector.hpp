@@ -322,11 +322,7 @@ namespace detail
         constexpr const T& operator*() const noexcept { return data_; }
 
     private:
-        union
-        {
-            unsigned char dummy_ = {};
-            T data_;
-        };
+        union { T data_; };
         Allocator& alloc_;
     };
 
@@ -498,11 +494,11 @@ public:
 
     constexpr void assign(size_type count, const T& value)
     {
-        const auto src_size = static_cast<difference_type>(count);
+        const auto src_size = difference_type(count);
         const auto old_size = std::distance(first_, last_);
         const auto com_size = std::min(old_size, src_size);
 
-        if (capacity() >= count)
+        if (last_alloc_ - first_ >= difference_type(count))
         {
             detail::assign_range(first_, first_ + com_size, value);
             detail::construct_range(alloc_, first_ + com_size, first_ + src_size, value);
@@ -529,7 +525,7 @@ public:
         const auto old_size = std::distance(first_, last_);
         const auto com_size = std::min(old_size, src_size);
 
-        if (capacity() >= size_type(src_size))
+        if (last_alloc_ - first_ >= src_size)
         {
             detail::assign_range(first_, first_ + com_size, src_first);
             detail::construct_range(alloc_, first_ + com_size, first_ + src_size, src_first + com_size);
@@ -713,6 +709,7 @@ public:
     constexpr bool empty() const noexcept { return first_ == last_; }
 
     constexpr size_type size() const noexcept { return size_type(last_ - first_); }
+    constexpr difference_type ssize() const noexcept { return last_ - first_; }
     constexpr size_type capacity() const noexcept { return size_type(last_alloc_ - first_); }
     constexpr size_type max_size() const noexcept { return std::allocator_traits<A>::max_size(alloc_); }
     
@@ -793,9 +790,7 @@ public:
     constexpr reference emplace_back(Args&&... args)
     {
         if (last_ != last_alloc_) return emplace_back_unchecked(std::forward<Args>(args)...);
-
-        reallocate_append(next_capacity(), std::forward<Args>(args)...);
-        return back();
+        return *reallocate_append(next_capacity(), std::forward<Args>(args)...);
     }
 
     template<typename... Args>
@@ -818,64 +813,73 @@ public:
     template<typename... Args>
     constexpr iterator emplace(const_iterator pos, Args&&... args)
     {
-        if (pos == cend()) return std::addressof(emplace_back(std::forward<Args>(args)...));
+        if (last_ != last_alloc_)
+        {
+            if (pos == cend()) return std::addressof(emplace_back_unchecked(std::forward<Args>(args)...));
 
-        detail::allocator_managed<T, A> new_elem(alloc_, std::forward<Args>(args)...);
+            detail::allocator_managed<T, A> new_elem(alloc_, std::forward<Args>(args)...);
 
-        const auto offset = std::distance(cbegin(), pos);
+            const difference_type offset = std::distance(cbegin(), pos);
 
-        if (size() == capacity()) reallocate_n(next_capacity());
-        detail::construct(alloc_, last_, std::move(back()));
-        std::shift_right(first_ + offset, last_++, 1);
-        *(first_ + offset) = std::move(*new_elem);
-        return first_ + offset;
+            detail::construct(alloc_, last_, std::move(back()));
+            std::shift_right(first_ + offset, last_++, 1);
+            *(first_ + offset) = std::move(*new_elem);
+            return first_ + offset;
+        }
+
+        return reallocate_emplace(next_capacity(), pos, std::forward<Args>(args)...);
     }
 
     constexpr iterator insert(const_iterator pos, size_type count, const T& value)
     {
-        const auto offset = std::distance(cbegin(), pos);
-        const auto src_size = static_cast<difference_type>(count);
-        const auto new_size = size() + count;
+        if (last_alloc_ - last_ >= count)
+        {
+            const difference_type offset = std::distance(cbegin(), pos);
+            const difference_type src_size = difference_type(count);
 
-        reserve(new_size);
+            const auto middle = first_ + std::max(ssize() - src_size, offset);
+            const auto moved_size = last_ - middle;
+            const auto old_last   = last_;
+            const auto new_last   = last_ + src_size;
+            const auto new_middle = middle + src_size;
 
-        const auto middle = std::max(last_ - src_size, first_ + offset);
-        const auto moved_size = last_ - middle;
-        const auto new_last = last_ + src_size;
-        const auto new_middle = last_ + src_size - moved_size;
-        const auto old_last = last_;
+            detail::construct_range(alloc_, last_, new_middle, value);
+            last_ = new_middle;
+            detail::relocate_range_weak(alloc_, middle, old_last, new_middle);
+            last_ = new_last;
+            detail::assign_range(middle, old_last, value);
 
-        detail::construct_range(alloc_, last_, new_middle, value);
-        last_ = new_middle;
-        detail::relocate_range_weak(alloc_, middle, old_last, new_middle);
-        last_ = new_last;
-        detail::assign_range(middle, old_last, value);
+            return first_ + offset;
+        }
 
-        return first_ + offset;
+        return reallocate_insert(next_capacity(count), pos, count, value);
     }
 
     template<std::forward_iterator Iter>
     constexpr iterator insert(const_iterator pos, Iter src_first, Iter src_last)
     {
-        const auto offset = std::distance(cbegin(), pos);
-        const auto src_size = std::distance(src_first, src_last);
-        const auto new_size = size() + src_size;
+        const difference_type src_size = std::distance(src_first, src_last);
 
-        reserve(new_size);
+        if (last_alloc_ - last_ >= src_size)
+        {
+            const difference_type offset = std::distance(cbegin(), pos);
 
-        const auto middle = std::max(last_ - src_size, first_ + offset);
-        const auto moved_size = last_ - middle;
-        const auto new_last   = last_ + src_size;
-        const auto new_middle = last_ + src_size - moved_size;
-        const auto old_last   = last_;
+            const auto middle = first_ + std::max(ssize() - src_size, offset);
+            const auto moved_size = last_ - middle;
+            const auto old_last   = last_;
+            const auto new_last   = last_ + src_size;
+            const auto new_middle = middle + src_size;
 
-        detail::construct_range(alloc_, last_, new_middle, src_first + moved_size);
-        last_ = new_middle;
-        detail::relocate_range_weak(alloc_, middle, old_last, new_middle);
-        last_ = new_last;
-        detail::assign_range(middle, old_last, src_first);
+            detail::construct_range(alloc_, last_, new_middle, std::next(src_first, moved_size));
+            last_ = new_middle;
+            detail::relocate_range_weak(alloc_, middle, old_last, new_middle);
+            last_ = new_last;
+            detail::assign_range(middle, old_last, src_first);
 
-        return first_ + offset;
+            return first_ + offset;
+        }
+
+        return reallocate_insert(next_capacity(size_type(src_size)), pos, src_first, src_last);
     }
 
     template<std::input_iterator Iter>
@@ -885,7 +889,7 @@ public:
         const auto old_size = std::distance(first_, last_);
 
         while (src_first != src_last) emplace_back(*src_first++);
-        std::rotate(first_ + offset, first_ + difference_type(old_size), last_);
+        std::rotate(first_ + offset, first_ + old_size, last_);
 
         return first_ + offset;
     }
@@ -929,16 +933,12 @@ private:
 
     constexpr void allocate_n(size_type count)
     {
-        if (count <= buffer_.size())
-        {
-            set_buffer_storage(0);
-        }
-        else
-        {
-            detail::alloc_result_t<A> alloc_result = detail::allocate<T>(alloc_, count);
-            first_ = alloc_result.data;
-            last_alloc_ = alloc_result.data + alloc_result.size;
-        }
+        if (count <= inline_capacity()) return set_buffer_storage(0);
+
+        detail::alloc_result_t<A> alloc_result = detail::allocate<T>(alloc_, count);
+        first_      = alloc_result.data;
+        last_       = alloc_result.data;
+        last_alloc_ = alloc_result.data + alloc_result.size;
     }
 
     constexpr void reallocate_n(size_type new_capacity)
@@ -955,7 +955,7 @@ private:
     }
 
     template<typename... Args>
-    constexpr void reallocate_append(size_type new_capacity, Args&&... args)
+    constexpr iterator reallocate_append(size_type new_capacity, Args&&... args)
     {
         const size_type old_size = size();
 
@@ -968,6 +968,72 @@ private:
         detail::destroy_range(alloc_, first_, last_);
         deallocate();
         set_storage(alloc_result.data, old_size + 1, alloc_result.size);
+
+        return alloc_result.data + old_size;
+    }
+
+    template<typename... Args>
+    constexpr iterator reallocate_emplace(size_t new_capacity, const_iterator pos, Args&&... args)
+    {
+        const size_type old_size = size();
+        const difference_type offset = std::distance(cbegin(), pos);
+
+        detail::alloc_result_t<A> alloc_result = detail::allocate<T>(alloc_, new_capacity);
+        detail::scope_exit guard1{ [&] { detail::deallocate(alloc_, alloc_result.data, alloc_result.size); } };
+        detail::construct(alloc_, alloc_result.data + offset, std::forward<Args>(args)...);
+        detail::scope_exit guard2{ [&] { detail::destroy(alloc_, alloc_result.data + offset); } };
+        detail::relocate_range_strong(alloc_, first_, first_ + offset, alloc_result.data);
+        detail::scope_exit guard3{ [&] { detail::destroy_range(alloc_, alloc_result.data, alloc_result.data + offset); } };
+        detail::relocate_range_strong(alloc_, first_ + offset, last_, alloc_result.data + offset + 1);
+        { guard1.release(); guard2.release(); guard3.release(); }
+        detail::destroy_range(alloc_, first_, last_);
+        deallocate();
+        set_storage(alloc_result.data, old_size + 1, alloc_result.size);
+
+        return alloc_result.data + offset;
+    }
+
+    constexpr iterator reallocate_insert(size_t new_capacity, const_iterator pos, size_type count, const T& value)
+    {
+        const size_type old_size = size();
+        const difference_type src_size = difference_type(count);
+        const difference_type offset = std::distance(cbegin(), pos);
+
+        detail::alloc_result_t<A> alloc_result = detail::allocate<T>(alloc_, new_capacity);
+        detail::scope_exit guard1{ [&] { detail::deallocate(alloc_, alloc_result.data, alloc_result.size); } };
+        detail::relocate_range_weak(alloc_, first_, first_ + offset, alloc_result.data);
+        detail::scope_exit guard2{ [&] { detail::destroy_range(alloc_, alloc_result.data, alloc_result.data + offset); } };
+        detail::construct_range(alloc_, alloc_result.data + offset, alloc_result.data + offset + src_size, value);
+        detail::scope_exit guard3{ [&] { detail::destroy_range(alloc_, alloc_result.data + offset, alloc_result.data + offset + src_size); } };
+        detail::relocate_range_weak(alloc_, first_ + offset, last_, alloc_result.data + offset + src_size);
+        { guard1.release(); guard2.release(); guard3.release(); }
+        detail::destroy_range(alloc_, first_, last_);
+        deallocate();
+        set_storage(alloc_result.data, old_size + count, alloc_result.size);
+
+        return alloc_result.data + offset;
+    }
+
+    template<std::forward_iterator Iter>
+    constexpr iterator reallocate_insert(size_t new_capacity, const_iterator pos, Iter src_first, Iter src_last)
+    {
+        const size_type old_size = size();
+        const difference_type src_size = std::distance(src_first, src_last);
+        const difference_type offset = std::distance(cbegin(), pos);
+
+        detail::alloc_result_t<A> alloc_result = detail::allocate<T>(alloc_, new_capacity);
+        detail::scope_exit guard1{ [&] { detail::deallocate(alloc_, alloc_result.data, alloc_result.size); } };
+        detail::relocate_range_weak(alloc_, first_, first_ + offset, alloc_result.data);
+        detail::scope_exit guard2{ [&] { detail::destroy_range(alloc_, alloc_result.data, alloc_result.data + offset); } };
+        detail::construct_range(alloc_, alloc_result.data + offset, alloc_result.data + offset + src_size, src_first);
+        detail::scope_exit guard3{ [&] { detail::destroy_range(alloc_, alloc_result.data + offset, alloc_result.data + offset + src_size); } };
+        detail::relocate_range_weak(alloc_, first_ + offset, last_, alloc_result.data + offset + src_size);
+        { guard1.release(); guard2.release(); guard3.release(); }
+        detail::destroy_range(alloc_, first_, last_);
+        deallocate();
+        set_storage(alloc_result.data, old_size + size_type(src_size), alloc_result.size);
+
+        return alloc_result.data + offset;
     }
 
     constexpr void deallocate() noexcept

@@ -3,7 +3,6 @@
 #ifndef SMALL_VECTOR_SMALL_VECTOR_HPP
 #define SMALL_VECTOR_SMALL_VECTOR_HPP
 
-#include <array>
 #include <algorithm>
 #include <functional>
 #include <iterator>
@@ -13,7 +12,6 @@
 #include <type_traits>
 #include <utility>
 #include <stdexcept>
-#include <cstring>
 #include <cstdlib>
 #include <cstddef>
 #include <cassert>
@@ -200,7 +198,7 @@ namespace detail
         {
             if (!std::is_constant_evaluated())
             {
-                std::memset(first, 0, sizeof(T) * (last - first));
+                std::fill((char*)first, (char*)last, 0);
                 return;
             }
         }
@@ -233,7 +231,8 @@ namespace detail
         {
             if (!std::is_constant_evaluated())
             {
-                std::memcpy(first, std::to_address(src_first), sizeof(T) * (last - first));
+                char* src = (char*)std::to_address(src_first);
+                std::copy(src, src + sizeof(T) * (last - first), (char*)first);
                 return;
             }
         }
@@ -253,7 +252,7 @@ namespace detail
         {
             if (!std::is_constant_evaluated())
             {
-                std::memcpy(dest, first, sizeof(T) * (last - first));
+                std::copy((char*)first, (char*)last, (char*)dest);
                 return;
             }
         }
@@ -273,7 +272,7 @@ namespace detail
         {
             if (!std::is_constant_evaluated())
             {
-                std::memcpy(dest, first, sizeof(T) * (last - first));
+                std::copy((char*)first, (char*)last, (char*)dest);
                 return;
             }
         }
@@ -337,15 +336,15 @@ namespace detail
         constexpr small_vector_buffer() noexcept {};
         constexpr ~small_vector_buffer() noexcept {};
 
-        constexpr auto begin() noexcept { return data_.data(); }
-        constexpr auto begin() const noexcept { return data_.data(); }
+        constexpr auto begin() noexcept { return std::begin(data_); }
+        constexpr auto begin() const noexcept { return std::begin(data_); }
 
-        constexpr auto end() noexcept { return data_.data() + Size; }
-        constexpr auto end() const noexcept { return data_.data() + Size; }
+        constexpr auto end() noexcept { return std::end(data_); }
+        constexpr auto end() const noexcept { return std::end(data_); }
 
-        constexpr std::size_t size() const noexcept { return Size; }
+        constexpr std::size_t size() const noexcept { return std::size(data_); }
     private:
-        union { std::array<T, Size> data_; };
+        union { char dummy_ = {}; T data_[Size]; };
     };
 
 
@@ -427,8 +426,6 @@ public:
     constexpr small_vector(Iter src_first, Iter src_last, const A& allocator = A()) :
         alloc_(allocator)
     {
-        if (src_first == src_last) return;
-
         const auto src_len = std::distance(src_first, src_last);
         allocate_n(src_len);
         detail::scope_exit guard{ [&] { deallocate(); } };
@@ -472,9 +469,9 @@ public:
         }
         else
         {
-            std::swap(first_, other.first_);
-            std::swap(last_, other.last_);
-            std::swap(last_alloc_, other.last_alloc_);
+            first_ = std::exchange(other.first_, other.buffer_.begin());
+            last_  = std::exchange(other.last_, other.buffer_.begin());
+            last_alloc_ = std::exchange(other.last_alloc_, other.buffer_.end());
         }
     }
 

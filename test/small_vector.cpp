@@ -212,6 +212,7 @@ TEST_CASE("small_vector(nullptr, nullptr)", "[constructor]")
     const small_vector<int> vec(static_cast<int*>(nullptr), static_cast<int*>(nullptr));
 
     REQUIRE(vec.empty());
+    REQUIRE(vec.capacity() != 0);
 }
 
 TEMPLATE_TEST_CASE("small_vector(initializer_list)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
@@ -244,6 +245,7 @@ TEMPLATE_TEST_CASE("small_vector(const small_vector&)", "[constructor]", Trivial
 
     REQUIRE(vec.size() == source.size());
     REQUIRE(vec == source);
+    REQUIRE(vec.capacity() != 0);
 }
 
 TEMPLATE_TEST_CASE("small_vector(const small_vector&, Alloc)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
@@ -256,6 +258,7 @@ TEMPLATE_TEST_CASE("small_vector(const small_vector&, Alloc)", "[constructor]", 
 
     REQUIRE(vec.size() == source.size());
     REQUIRE(vec == source);
+    REQUIRE(vec.capacity() != 0);
 }
 
 TEMPLATE_TEST_CASE("small_vector(small_vector&&)", "[constructor]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
@@ -269,6 +272,12 @@ TEMPLATE_TEST_CASE("small_vector(small_vector&&)", "[constructor]", TrivialType,
 
     REQUIRE(vec.size() == source_copy.size());
     REQUIRE(vec == source_copy);
+
+    REQUIRE(source.empty());
+    REQUIRE(source.capacity() != 0);
+
+    source.push_back(TestType{ 11 });
+    REQUIRE(source.size() == 1);
 }
 
 TEMPLATE_TEST_CASE("small_vector<MoveOnlyType>(small_vector&&)", "[constructor]", MoveOnlyType)
@@ -282,6 +291,12 @@ TEMPLATE_TEST_CASE("small_vector<MoveOnlyType>(small_vector&&)", "[constructor]"
 
     REQUIRE(vec.size() == source_copy.size());
     REQUIRE(vec == source_copy);
+
+    REQUIRE(source.empty());
+    REQUIRE(source.capacity() != 0);
+
+    source.push_back(TestType{ 11 });
+    REQUIRE(source.size() == 1);
 }
 
     //-----------------------------------//
@@ -381,6 +396,11 @@ TEMPLATE_TEST_CASE("operator=(small_vector&&)", "[assignment]", TrivialType, Non
 
     REQUIRE(dest.size() == src_copy.size());
     REQUIRE(dest == src_copy);
+
+    REQUIRE(source.capacity() != 0);
+
+    source = dest;
+    REQUIRE(source == dest);
 }
 
 TEMPLATE_TEST_CASE("operator=(initializer_list)", "[assignment]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
@@ -516,6 +536,11 @@ TEMPLATE_TEST_CASE("swap", "[modifiers]", TrivialType, NonTrivialType)
 
     REQUIRE(right == old_left);
     REQUIRE(left == old_right);
+
+    swap(left, right);
+
+    REQUIRE(left == old_left);
+    REQUIRE(right == old_right);
 }
 
 TEMPLATE_TEST_CASE("push_back(const T&)", "[modifiers]", TrivialType, NonTrivialType, NonDefaultConstructibleType)
@@ -960,6 +985,11 @@ TEMPLATE_TEST_CASE("propagate_on_move_assignment", "[allocators]", TrivialType, 
 
     REQUIRE(dest.size() == src_copy.size());
     REQUIRE(dest == src_copy);
+
+    REQUIRE(source.capacity() != 0);
+
+    source = dest;
+    REQUIRE(source == dest);
 }
 
 TEMPLATE_TEST_CASE("propagate_on_swap", "[allocators]", TrivialType, NonTrivialType)
@@ -977,4 +1007,9 @@ TEMPLATE_TEST_CASE("propagate_on_swap", "[allocators]", TrivialType, NonTrivialT
 
     REQUIRE(right == old_left);
     REQUIRE(left == old_right);
+
+    swap(left, right);
+
+    REQUIRE(left == old_left);
+    REQUIRE(right == old_right);
 }
